@@ -371,7 +371,7 @@ CompactSubObj=127
 
 [1F81Value]
 NrOfEntries=1
-1=0x00000011
+1=0x00000001
 
 [1F82]
 ParameterName=Request NMT

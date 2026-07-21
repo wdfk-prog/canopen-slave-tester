@@ -1,109 +1,126 @@
-# CANopen 从机测试工具
+# CANopen Slave Tester
 
-本工程基于 Lely CANopen，实现阶段 P1 的 CANopen 主站运行时，用于连接和观察 MCU CANopenNode 从机。
+基于 Lely CANopen 的嵌入式 Linux 主站测试工具，用于验证运行在 MCU 上的 CANopenNode 从机。
 
-当前程序支持：
+当前版本聚焦 P0 工程基础和 P1 运行时：严格加载配置、初始化 SocketCAN 和 Lely `AsyncMaster`、观察从机 boot-up/NMT/heartbeat/CAN 状态，并提供可重复部署、日志和安全退出能力。NMT、SDO、PDO、SYNC、TIME、EMCY、LSS 的自动测试 Harness 将在后续阶段加入。
 
-- 加载并严格校验 `config/tester.conf`；
-- 打开 SocketCAN 接口并校验标称波特率和控制器状态；
-- 创建 Lely I/O 上下文、事件循环、定时器、CAN 通道和 `AsyncMaster`；
-- 按配置路径加载任意合法、非空的 master DCF；
-- 记录 CAN 状态、CAN 错误、heartbeat、NMT 状态和 boot-up 事件；
-- 使用 vendored Header-only spdlog 输出有界异步日志；
-- 通过 `SIGINT` 或 `SIGTERM` 请求安全退出；
-- 支持同一 `LelyRuntime` 对象执行多轮 `Start()`/`Stop()`，启动失败时自动回滚半初始化资源；
-- 使用稳定退出码区分配置、SocketCAN、Lely 和内部错误。
+| 项目          | 当前值                                |
+| ------------- | ------------------------------------- |
+| 工具版本      | `0.3.0`                               |
+| 当前阶段      | `P1-runtime`                          |
+| CANopen 主站  | Lely CANopen `2.4.0`                  |
+| 日志          | vendored spdlog `1.17.0`，Header-only |
+| 目标平台      | Linux/aarch64，TQ8MP                  |
+| 从机参考平台  | RT-Thread + CANopenNode，Node-ID 1    |
+| 默认 CAN 接口 | `can1`，1 Mbit/s                      |
 
-当前阶段不包含 replxx、测试 Harness 以及 NMT、SDO、PDO 自动测试用例。
+## 当前状态
 
-## 构建配置
+- **P0 工程基础：已完成。** 交叉编译、本地配置隔离、目标板 Lely 运行库安装、部署脚本、配置校验和稳定退出码已经具备。
+- **P1 运行时：实现完成，当前有条件通过。** 最新验证中 `configuration validated`、`Lely runtime is ready`、`boot node=1 ... status=success`、`can_state=active`、`can_errors=0`、`dropped_logs=0` 均正常；待补充修改后 MCU `Dropped.receive.packages` 增量为 `0` 的同轮证据后转为完全通过。
+- **从机侧证据：** 此前的 `EMCY 0x8110` 已定位为批量 NMT 帧叠加逐帧 trace 导致的软件接收队列丢包；将 `reset_communication` 设为 `true` 后，启动流量由 Node-ID 2～126 的 125 帧定向复位变为单帧广播 `000#8200`，修改后日志未再出现 `0x8110`。
 
-机器相关路径不写入版本库。首次构建时复制本地配置模板：
+当前实测结论和原始日志摘录见 [P0/P1 验收结果与证据](docs/acceptance.md)。
+
+## 功能概览
+
+- 严格解析并校验 `config/tester.conf`，拒绝未知键、重复键、非法范围和空 DCF/EDS。
+- 校验 SocketCAN 接口是否存在、标称波特率是否匹配，以及控制器是否处于可运行状态。
+- 创建 Lely I/O context、poll、单线程 event loop、executor、timer、CAN channel 和 `AsyncMaster`。
+- 加载 `master.dcf`，记录 CAN 状态、CAN 错误、heartbeat、NMT 状态和 boot-up。
+- 采用有界异步日志队列和 `overrun_oldest` 策略，避免 Lely callback 被终端或文件 I/O 阻塞。
+- 通过 POSIX self-pipe 将 `SIGINT`/`SIGTERM` 转换为普通线程上的停止请求。
+- `Start()` 失败时按逆依赖顺序回滚，`Stop()` 幂等，并允许同一运行时对象执行多轮独立会话。
+- 支持一键部署、远程运行和 `gdbserver` 调试。
+
+## 快速开始
+
+### 1. 准备本机构建配置
 
 ```sh
 cp cmake/build_config.local.cmake.example cmake/build_config.local.cmake
 ```
 
-然后在 `cmake/build_config.local.cmake` 中设置 Yocto SDK、sysroot、Lely staged 头文件和库目录。
-该文件已由 `.gitignore` 排除；`cmake/build_config.cmake` 只负责加载并校验本地配置。
+编辑 `cmake/build_config.local.cmake`，填写 Yocto SDK、sysroot、Lely staged 头文件/库目录和目标板地址。机器相关路径不会写入版本库。
 
-P1 构建直接使用已有 Lely staged 产物，不会解压、复制或重新安装 Lely。修改交叉编译器、目标架构、sysroot 或 Lely 路径后，需要删除旧构建目录：
+### 2. 生成主站 DCF
 
-```sh
-rm -rf build
-```
-
-## 编译
+工程使用 Ubuntu 构建主机上的 Python 虚拟环境运行 `dcfgen`。首次安装、离线 wheel、环境修复和生成文件部署见 [dcfgen 安装与使用](docs/dcfgen-setup.md)。已有环境可从工程根目录运行：
 
 ```sh
-mkdir -p build
-cd build
-cmake ..
-make -j"$(nproc)"
+source .venv-dcf-tools/bin/activate
+cd config
+dcfgen -r -v -d generated master.yml
+cd ..
+deactivate
 ```
 
-不需要设置 `CROSS_COMPILE`、`LELY_STAGE`，也不需要传入 `CMAKE_TOOLCHAIN_FILE`。
+不激活虚拟环境也可以直接运行：
 
-默认生成：
+```sh
+cd config
+../.venv-dcf-tools/bin/dcfgen -r -v -d generated master.yml
+cd ..
+```
+
+P1 推荐保留以下 NMT 基线：
+
+```yaml
+master:
+  start: false
+  start_nodes: false
+  start_all_nodes: false
+  reset_all_nodes: false
+  stop_all_nodes: false
+
+mcu_node_1:
+  boot: false
+  mandatory: false
+  reset_communication: true
+```
+
+`reset_communication: true` 允许 Lely 使用一帧广播 `000#8200`。不要改回 `false`，否则 Lely 为避开 Node-ID 1，可能逐个向 Node-ID 2～126 发送 `Reset Communication`，形成 125 帧启动突发。
+
+详细字段、配置模板和生成结果检查见 [配置手册](docs/configuration.md)。
+
+### 3. 编译
+
+```sh
+cmake -S . -B build
+cmake --build build -j"$(nproc)"
+```
+
+输出：
 
 ```text
 build/canopen_slave_tester
 build/canopen_slave_tester.map
 ```
 
-## spdlog 集成
-
-工程以 Header-only 方式导入 vendored spdlog 源码：
-
-```text
-third_party/spdlog/include/spdlog
-```
-
-源码随本工程交叉编译，不生成或链接独立 `libspdlog.so`、`libspdlog.a`。
-
-## 日志配置
-
-日志等级和输出策略位于 `config/tester.conf` 的 `[logging]` 段。常用调试配置：
-
-```ini
-runtime_level=debug
-socketcan_level=debug
-canopen_level=debug
-console_level=info
-file_level=debug
-```
-
-异步队列固定采用 `overrun_oldest`，队列满时覆盖最旧消息，不阻塞 Lely event loop。
-
-## DCF 配置
-
-DCF 由配置文件决定，不与可执行程序哈希绑定：
-
-```ini
-[master]
-dcf_path=/opt/Ultra/Debug/canopen-slave-tester/config/master.dcf
-```
-
-本地生成文件为 `config/generated/master.dcf`。部署脚本会将其安装为目标板上的
-`/opt/Ultra/Debug/canopen-slave-tester/config/master.dcf`。切换 DCF 只需修改部署文件或配置路径并重新启动程序。
-
-## 部署与远程调试
-
-在 `cmake/build_config.local.cmake` 中设置目标板地址：
-
-```cmake
-set(CACHED_IP_ADDR
-    "192.168.1.100"
-    CACHE STRING "Target board address for deployment" FORCE)
-```
-
-该本地配置使用 `CACHE ... FORCE`，因此不要使用 `-DCACHED_IP_ADDR=...` 临时覆盖；修改文件后重新配置：
+修改交叉编译器、目标架构、sysroot 或 Lely 路径后，应先删除旧构建目录：
 
 ```sh
-cmake -S . -B build
+rm -rf build
 ```
 
-部署并直接运行：
+### 4. 安装目标板 Lely 运行库
+
+首次部署前：
+
+```sh
+cp deploy/local.conf.example deploy/local.conf
+chmod 600 deploy/local.conf
+```
+
+填写目标地址和宿主机上的 Lely 运行库归档路径，然后运行：
+
+```sh
+./deploy/install_lely.sh
+```
+
+正式产品应将 Lely 制作成 Yocto/DEB 软件包；该脚本面向受信任的开发调试网络。
+
+### 5. 部署并运行
 
 ```sh
 cmake --build build --target download
@@ -115,88 +132,124 @@ cmake --build build --target download
 cmake --build build --target debug
 ```
 
-部署脚本默认使用 SSH 密钥认证。需要密码认证时，先导出：
+目标板手工运行：
 
 ```sh
-export CANOPEN_TARGET_PASSWORD='your-password'
-```
-
-`download` 和 `debug` 每次都会上传并替换以下文件：
-
-| 本地文件 | 目标板文件 |
-| --- | --- |
-| 构建生成的可执行文件 | `bin/canopen_slave_tester`；`debug` 模式为 `bin/canopen_slave_tester.elf` |
-| `config/tester.conf` | `config/tester.conf` |
-| `config/generated/master.dcf` | `config/master.dcf` |
-| `config/project.eds` | `config/project.eds` |
-
-三个配置文件是程序运行的必需输入，部署前脚本会检查其存在且非空。目标板已有文件会分别备份到
-`bin/backup/` 和 `config/backup/`。
-
-远端激活按文件顺序执行，不提供四个文件整体的事务式回滚；该行为面向配置保持兼容的开发调试流程。
-任一步骤失败时，脚本会返回非零退出码，并在当前终端输出远端标准错误及阶段提示，例如
-`Target preparation failed`、`upload failed`、`Deployment activation failed` 或 `Remote execution failed`。
-需要恢复时，可根据终端错误阶段从对应 `backup/` 目录手动还原最近备份。
-
-SSH 主机密钥在首次连接时由 `ssh-keyscan` 自动写入 `known_hosts`，该流程仅适用于受信任的隔离调试网络。
-
-### 安装目标板 Lely 运行库
-
-目标板地址和宿主机上的 Lely 归档路径属于本地环境信息，不写入脚本或版本库。首次使用时复制部署配置模板：
-
-```sh
-cp deploy/local.conf.example deploy/local.conf
-chmod 600 deploy/local.conf
-```
-
-在 `deploy/local.conf` 中设置：
-
-```sh
-CANOPEN_TARGET_IP="192.0.2.10"
-CANOPEN_LOCAL_LELY_ARCHIVE="/path/to/lely-runtime.tar.gz"
-CANOPEN_TARGET_USER="root"
-CANOPEN_TARGET_SSH_PORT="22"
-CANOPEN_SSH_CONNECT_TIMEOUT="5"
-CANOPEN_TARGET_PASSWORD=""
-```
-
-`CANOPEN_LOCAL_LELY_ARCHIVE` 是宿主机上的归档绝对路径。脚本会通过 SCP 将归档上传到目标板临时
-目录，然后在目标板解压并安装运行库。`deploy/local.conf` 已由 `.gitignore` 排除。密码可保存在
-该本地文件中，但仍优先推荐 SSH 密钥。配置完成后直接执行，不需要任何位置参数：
-
-```sh
-./deploy/install_lely.sh
-```
-
-部署脚本的提示、错误和远端安装输出统一使用英文，并直接输出到当前终端，不保存本地日志文件。
-
-脚本自动定位归档中包含完整 Lely 运行库集合的目录，将 `liblely-*.so*` 安装到
-`/usr/local/lib`，写入 `/etc/ld.so.conf.d/lely.conf` 并执行 `ldconfig`。安装前会备份已有版本，
-失败时尝试自动回滚，并清理上传到目标板的临时归档；若回滚未完整完成，脚本会明确提示并保留备份目录供手工恢复。程序依赖检查不属于该脚本职责。正式产品建议
-将 Lely 制作成 Yocto/DEB 软件包，由系统包管理器安装和升级。
-
-如果脚本报告 `The SSH service is not accepting connections`，说明目标地址的 SSH 端口没有接受连接。
-应检查目标板 IP、网线或路由、防火墙，以及 `sshd` 或 `dropbear` 是否已启动；若 SSH 使用非 22
-端口，在 `deploy/local.conf` 中修改 `CANOPEN_TARGET_SSH_PORT`。
-
-## 目标板运行
-
-将可执行程序和配置部署到目标目录后，先检查配置：
-
-```sh
-./canopen_slave_tester --config config/tester.conf --check-config
-```
-
-查看程序版本：
-
-```sh
-./canopen_slave_tester --version
-```
-
-启动运行时：
-
-```sh
-./canopen_slave_tester --config config/tester.conf
+cd /opt/Ultra/Debug/canopen-slave-tester
+./bin/canopen_slave_tester --config config/tester.conf
 ```
 
 按 `Ctrl-C` 请求正常退出。
+
+## 文档
+
+| 文档                                       | 内容                                              |
+| ------------------------------------------ | ------------------------------------------------- |
+| [文档首页](docs/index.md)                  | 按角色和任务导航全部文档                          |
+| [入门教程](docs/getting-started.md)        | 从准备主机到完成首次 P1 运行                      |
+| [配置手册](docs/configuration.md)          | `tester.conf`、`master.yml` 和生成结果检查        |
+| [dcfgen 安装与使用](docs/dcfgen-setup.md)  | 创建虚拟环境、安装 dcf-tools、生成和部署 DCF      |
+| [构建与部署](docs/deployment.md)           | 交叉编译、运行库安装、部署、远程调试              |
+| [P0/P1 验收结果与证据](docs/acceptance.md) | 当前验收结论、日志证据和未闭环项                  |
+| [设计文档](docs/design.md)                 | 架构、生命周期、线程模型、资源所有权和错误模型    |
+| [API 文档](docs/api.md)                    | CLI、退出码和 C++ 公共接口                        |
+| [故障排查](docs/troubleshooting.md)        | CAN 接收丢包、`0x8110`、DCF、SocketCAN 和部署问题 |
+
+## 架构概览
+
+```mermaid
+flowchart LR
+    Operator[开发者 / CI] --> CLI[canopen_slave_tester]
+    CLI --> Config[tester.conf]
+    CLI --> Runtime[LelyRuntime]
+    Runtime --> DCF[master.dcf]
+    Runtime --> SocketCAN[SocketCAN can1]
+    SocketCAN <--> Bus[CAN 总线]
+    Bus <--> Slave[RT-Thread + CANopenNode 从机]
+    Runtime --> Status[RuntimeStatus]
+    Runtime --> Log[异步日志]
+    Signal[SIGINT / SIGTERM] --> SignalBridge[SignalHandler self-pipe]
+    SignalBridge --> Runtime
+```
+
+详细设计见 [设计文档](docs/design.md)。
+
+## 命令行
+
+```text
+Usage: canopen_slave_tester [options]
+
+Options:
+  --config PATH   Load runtime configuration from PATH.
+  --check-config  Validate configuration and referenced files, then exit.
+  --version       Print software and build dependency versions.
+  -h, --help      Print this help text.
+```
+
+常用命令：
+
+```sh
+./canopen_slave_tester --version
+./canopen_slave_tester --config config/tester.conf --check-config
+./canopen_slave_tester --config config/tester.conf
+```
+
+## 配置和部署文件
+
+| 本地文件                              | 作用                             | 目标板默认位置       |
+| ------------------------------------- | -------------------------------- | -------------------- |
+| `config/tester.conf`                  | 运行时、超时、路径和日志配置     | `config/tester.conf` |
+| `config/master.yml`                   | `dcfgen` 网络描述源文件          | 仅构建主机使用       |
+| `config/generated/master.dcf`         | Lely 主站对象字典和 NMT 启动策略 | `config/master.dcf`  |
+| `config/project.eds`                  | 测试程序引用的从机 EDS           | `config/project.eds` |
+| `config/generated/project.dcfgen.eds` | `dcfgen` 输入的从机 EDS          | 仅生成阶段使用       |
+
+目标板默认根目录：
+
+```text
+/opt/Ultra/Debug/canopen-slave-tester
+```
+
+## P1 基线预期日志
+
+启动：
+
+```text
+[info] [configuration] configuration validated
+NMT: sending command specifier 130 to node 0
+[info] [runtime] Lely runtime is ready
+[info] [runtime] event loop started
+[info] [canopen] boot node=1 state=0x0 status=success
+```
+
+退出：
+
+```text
+[info] [signal] SIGINT received
+[info] [runtime] stop requested
+[info] [runtime] event-loop shutdown started
+[info] [runtime] event loop stopped after ... tasks
+[info] [runtime] runtime resources released
+[info] [runtime] session=... lifecycle=stopped can_state=active can_errors=0 dropped_logs=0 ...
+```
+
+不应出现：
+
+```text
+NMT: sending command specifier 130 to node 2
+...
+NMT: sending command specifier 130 to node 126
+EMCY: received 8110 10
+```
+
+## 当前边界和后续阶段
+
+P1 不包含交互式控制台、测试 Harness、测试报告生成，以及 NMT、SDO、PDO、SYNC、TIME、EMCY 和 LSS 自动用例。现有 `timeouts.*`、`console.history_path` 和 `console.report_directory` 为后续阶段保留，P1 仅负责加载和校验。
+
+后续阶段应在不破坏 P1 生命周期和错误边界的前提下，逐步加入：
+
+1. NMT 状态转换和 boot-up/heartbeat 自动断言；
+2. SDO expedited/segmented/block 上传下载和 abort code 验证；
+3. RPDO/TPDO 映射、事件定时器、同步传输和数据一致性；
+4. EMCY、SYNC、TIME、heartbeat consumer、Node guarding 和 LSS；
+5. 结构化测试报告、历史记录和可重复回归执行。
