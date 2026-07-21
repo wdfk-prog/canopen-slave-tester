@@ -1,0 +1,6 @@
+name=spdlog
+version=1.17.0
+tag=v1.17.0
+commit=79524ddd08a4ec981b7fea76afd08ee05f83755d
+integration=vendored-header-only
+source=https://github.com/gabime/spdlog/tree/v1.17.0

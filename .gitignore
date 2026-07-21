@@ -1,0 +1,6 @@
+/.venv-dcf-tools/
+__pycache__/
+*.py[cod]
+/build/
+/cmake/build_config.local.cmake
+/deploy/local.conf

@@ -1,0 +1,17 @@
+# Copy this file to deploy/local.conf and update the local values.
+# deploy/local.conf is excluded from Git.
+
+# Target board address used by the deployment scripts.
+CANOPEN_TARGET_IP="192.0.2.10"
+
+# Absolute path of the prebuilt Lely .tar.gz archive on the host machine.
+CANOPEN_LOCAL_LELY_ARCHIVE="/path/to/lely-runtime.tar.gz"
+
+# Optional SSH settings.
+CANOPEN_TARGET_USER="root"
+CANOPEN_TARGET_SSH_PORT="22"
+CANOPEN_SSH_CONNECT_TIMEOUT="5"
+
+# Optional password authentication. Prefer an SSH key when practical.
+# This file is excluded from Git, but it should still be protected with mode 600.
+CANOPEN_TARGET_PASSWORD=""

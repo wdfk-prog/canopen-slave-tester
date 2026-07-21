@@ -1,0 +1,175 @@
+# Lely dcfgen 2.4.0 完整配置模板。
+#
+# 使用方法：
+#   1. 将本文件保存为 config/demo.yml。
+#   2. 将从机 EDS/DCF 放到 config/generated/project.dcfgen.eds。
+#   3. 进入 config 目录执行：
+#        dcfgen -r -v -d generated demo.yml
+#
+# 下方只启用了建立当前工程主从关系所需的基线字段。其他字段均为
+# 可选配置，保留为注释。取消注释前必须确认取值、单位、EDS 支持情况
+# 以及对自动启动和配置下发的影响。
+
+# -----------------------------------------------------------------------------
+# 全局默认值，可被 master 或任意从机 section 继承。
+# 整个 options section 均为可选；使用工具默认值时可以完全省略。
+# -----------------------------------------------------------------------------
+# options:
+#   # 目标系统上 concise DCF 文件的运行时目录前缀。
+#   # 该字段不是输入 EDS 路径，也不会相对于本 YAML 文件自动解析。
+#   dcf_path: "/opt/canopen/config"
+#
+#   # heartbeat consumer timeout 的默认倍率。
+#   # 例如 producer 周期为 1000 ms，倍率为 3.0，则超时为 3000 ms。
+#   heartbeat_multiplier: 3.0
+#
+#   # NMT boot 重试因子，写入对象 0x1F81 的高字节字段。
+#   retry_factor: 3
+
+# -----------------------------------------------------------------------------
+# 主站 section。section 名称必须是 master。
+# -----------------------------------------------------------------------------
+master:
+  # 当前工程必配：主站 CANopen Node-ID。
+  # 通常使用 1..127；本工程约定主站使用 127。
+  node_id: 127
+
+  # 当前工程必配：CAN bit rate，单位 kbit/s。
+  # 必须与 Linux CAN 接口和总线上全部节点一致。
+  baudrate: 1000
+
+  # 主站 identity 对象 0x1018。没有正式分配值时保持默认 0。
+  # vendor_id: 0x00000000       # 0x1018:01，供应商 ID。
+  # product_code: 0x00000000    # 0x1018:02，产品代码。
+  # revision_number: 0x00000000 # 0x1018:03，修订版本。
+  # serial_number: 0x00000000   # 0x1018:04，序列号。
+
+  # SYNC producer 配置。
+  sync_period: 0              # 0x1006，单位 us；0 表示不周期发送 SYNC。
+  sync_window: 0              # 0x1007，单位 us；0 表示不启用 SYNC window。
+  sync_overflow: 0            # 0x1019；0 表示 SYNC 不携带 counter byte。
+
+  # TIME 与 EMCY 通信参数。
+  # time_cob_id: 0x00000100     # 0x1012，TIME 默认 CAN-ID 为 0x100。
+  # emcy_inhibit_time: 0        # 0x1015，单位 100 us。
+
+  # 主站 heartbeat 行为。
+  # heartbeat_multiplier: 3.0   # 覆盖 options.heartbeat_multiplier。
+  heartbeat_consumer: false    # 为配置的从机生成主站 0x1016 consumer 条目。
+  heartbeat_producer: 0    # 主站 0x1017，单位 ms；0 表示禁用。
+
+  # 主站错误行为对象 0x1029，map key 为子索引/错误类别。
+  # error_behavior:
+  #   1: 0x00
+
+  # 连续 NMT 命令之间的最小间隔。
+  # nmt_inhibit_time: 0         # 0x102A，单位 100 us。
+
+  # NMT 启动策略。工具默认 start=true、start_nodes=true。
+  # 显式协议测试时，可取消下面五项注释并保持 false，避免主站自动改变状态。
+  start: false                # false：主站不自动进入 Operational。
+  start_nodes: false          # false：主站不自动启动已配置从机。
+  start_all_nodes: false      # true：广播 NMT Start 到全部节点。
+  reset_all_nodes: false      # true：mandatory 从机失败时 reset all。
+  stop_all_nodes: false       # true：mandatory 从机失败时 stop all。
+
+  # mandatory 从机的 boot 超时。
+  boot_time: 0                # 0x1F89，单位 ms；0 表示不设置超时。
+
+# -----------------------------------------------------------------------------
+# 从机 section。除 options、master 和点号开头 section 外，其他顶层名称
+# 都会被当作从机。section 名同时决定 concise DCF 文件名，例如
+# mcu_node_1.bin。
+# -----------------------------------------------------------------------------
+mcu_node_1:
+  # 必配：dcfgen 在生成阶段读取的 EDS/DCF。
+  # 相对路径按执行 dcfgen 时的当前工作目录解析，不按本文件目录解析。
+  dcf: "generated/project.dcfgen.eds"
+
+  # 当前工程必配：从机 Node-ID，同时用于解析 EDS 中的 $NODEID 表达式。
+  node_id: 1
+
+  # 当前从机 concise DCF 的运行时目录，覆盖 options.dcf_path。
+  # dcf_path: "/opt/canopen/config"
+
+  # 从机 identity 期望值。启用后应与 EDS、设备和 boot 校验策略一致。
+  # revision_number: 0x00010000 # 期望 0x1018:03。
+  # serial_number: 0x00000001   # 期望 0x1018:04。
+
+  # 从机 TIME COB-ID。Lely 2.4.0 源码相关路径存在属性名不一致问题，
+  # 未完成本地修复和回归测试前不要启用。
+  # time_cob_id: 0x00000100
+
+  # heartbeat 监督与生产。
+  # heartbeat_multiplier: 3.0   # 当前从机 heartbeat timeout 倍率。
+  heartbeat_consumer: false   # true：配置从机监控主站 heartbeat。
+  heartbeat_producer: 0    # 写从机 0x1017，单位 ms。
+
+  # 当前从机 NMT boot 重试因子，覆盖 options.retry_factor。
+  retry_factor: 0
+
+  # Node guarding。不要与同一节点的非零 heartbeat_producer 同时启用。
+  # guard_time: 0               # 从机 0x100C，单位 ms。
+  # life_time_factor: 0         # 从机 0x100D；超时=guard_time*factor。
+
+  # 从机错误行为对象 0x1029。与 EDS 默认值不同会产生配置期 SDO 写入，
+  # 并可能生成 mcu_node_1.bin。
+  # error_behavior:
+  #   1: 0x00
+
+  # RPDO 覆盖。PDO 编号必须已存在于 EDS，映射对象必须允许 PDO mapping。
+  # rpdo:
+  #   1:
+  #     enabled: true            # 清除 invalid bit，启用该 RPDO。
+  #     cob_id: 0x00000201       # 可写 auto 或显式 11-bit CAN-ID。
+  #     transmission: 254        # 0..240 同步；254/255 事件驱动。
+  #     event_deadline: 0        # 单位 ms；2.4.0 有已知源码问题，暂勿启用。
+  #     mapping:
+  #       - index: 0x2200        # 当前示例 EDS 中的 control_value。
+  #         sub_index: 0
+
+  # TPDO 覆盖。Classic CAN 单个 PDO 的总映射长度不得超过 64 bit。
+  # tpdo:
+  #   1:
+  #     enabled: true            # 清除 invalid bit，启用该 TPDO。
+  #     cob_id: 0x00000181       # 可写 auto 或显式 11-bit CAN-ID。
+  #     transmission: 254        # 0..240 同步；254/255 事件驱动。
+  #     inhibit_time: 0          # 单位 100 us。
+  #     event_timer: 1000        # 单位 ms；0 表示禁用周期 event timer。
+  #     sync_start: 0            # 首次发送对应的 SYNC counter 值。
+  #     mapping:
+  #       - index: 0x2100        # 当前示例 EDS 中的 status_value。
+  #         sub_index: 0
+  #       - index: 0x2101        # 当前示例 EDS 中的 counter_value。
+  #         sub_index: 0
+
+  # NMT boot 与 assignment 策略。工具默认 boot=true、mandatory=false、
+  # reset_communication=true。显式协议测试时可取消注释并使用下列值。
+  boot: false                  # false：不自动 boot/configure 当前从机。
+  mandatory: false             # true：从机失败会影响主站启动/错误策略。
+  reset_communication: false   # false：禁止自动 NMT Reset Communication。
+
+  # NMT boot 使用的固件和配置管理对象。
+  # software_file: "firmware.bin"                # 0x1F58，固件路径。
+  # software_version: 0x00000000                 # 0x1F55，期望固件版本。
+  # configuration_file: "/opt/canopen/config/mcu_node_1.bin"
+  #                                               # 0x1F22，concise DCF 路径。
+  #                                               # 2.4.0 有已知解析问题，
+  #                                               # 优先使用自动推导路径。
+  # restore_configuration: 0                     # 0x1011 子索引；0 表示不恢复。
+
+  # 配置期附加 SDO 下载。工具按 EDS 数据类型编码 value。
+  # 启用后可能生成 mcu_node_1.bin 并在 boot 时修改从机，
+  # 因此不要在这里放临时测试值。
+  # sdo:
+  #   - index: 0x1017
+  #     sub_index: 0
+  #     value: 1000
+  #   - index: 0x2200
+  #     sub_index: 0
+  #     value: 0x12345678
+
+# 增加从机时，复制一个新的顶层 section 并使用唯一名称。
+# mcu_node_2:
+#   dcf: "generated/another_device.eds"
+#   node_id: 2

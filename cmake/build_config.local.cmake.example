@@ -1,0 +1,28 @@
+# Copy this file to cmake/build_config.local.cmake and update the local paths.
+# cmake/build_config.local.cmake is excluded from Git.
+
+# Yocto SDK cross-tool directory and executable prefix.
+set(CANOPEN_TOOLCHAIN_BIN_DIR
+    "/opt/sdk/sysroots/x86_64-sdk-linux/usr/bin/aarch64-target-linux"
+    CACHE PATH "Cross-compilation tool directory" FORCE)
+set(CANOPEN_TOOLCHAIN_PREFIX
+    "aarch64-target-linux"
+    CACHE STRING "Cross-compilation tool prefix" FORCE)
+
+# Target sysroot provided by the Yocto SDK.
+set(CANOPEN_SYSROOT
+    "/opt/sdk/sysroots/aarch64-target-linux"
+    CACHE PATH "Target sysroot" FORCE)
+
+# Existing staged Lely build products used during cross-compilation.
+set(CANOPEN_LELY_INCLUDE_DIR
+    "/opt/deps/lely/stage/usr/include"
+    CACHE PATH "Lely include directory" FORCE)
+set(CANOPEN_LELY_LIBRARY_DIR
+    "/opt/deps/lely/stage/usr/lib"
+    CACHE PATH "Lely library directory" FORCE)
+
+# Optional target address used by the CMake download and debug targets.
+set(CACHED_IP_ADDR
+    "192.0.2.10"
+    CACHE STRING "Target board address for deployment" FORCE)
