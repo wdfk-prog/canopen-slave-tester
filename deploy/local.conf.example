@@ -1,0 +1,14 @@
+# Copy this file to deploy/local.conf and update the local values.
+# deploy/local.conf is excluded from Git.
+
+# Target board address used by deploy/run.sh and deploy_lely_libraries.sh.
+CANOPEN_TARGET_IP="192.0.2.10"
+
+# Optional SSH settings.
+CANOPEN_TARGET_USER="root"
+CANOPEN_TARGET_SSH_PORT="22"
+CANOPEN_SSH_CONNECT_TIMEOUT="5"
+
+# Optional password authentication. Prefer an SSH key when practical.
+# This file is excluded from Git, but it should still be protected with mode 600.
+CANOPEN_TARGET_PASSWORD=""
