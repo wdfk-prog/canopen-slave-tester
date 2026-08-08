@@ -28,6 +28,13 @@
 /** Consumer timeout multiplier relative to the producer period. */
 #define CANOPEN_HEARTBEAT_MULTIPLIER 3
 
+/** Enable the A01 bidirectional Heartbeat verification process. */
+#define CANOPEN_ENABLE_HEARTBEAT_PROCESS 1
+/** Enable the A02 user OD SDO verification process. */
+#define CANOPEN_ENABLE_SDO_PROCESS 1
+/** Enable Reset Communication during application shutdown. */
+#define CANOPEN_ENABLE_FINAL_RESET_PROCESS 1
+
 /** Asynchronous spdlog queue capacity. */
 #define CANOPEN_LOG_QUEUE_SIZE 8192
 /** Number of asynchronous spdlog worker threads. */

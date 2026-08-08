@@ -124,8 +124,24 @@ NrOfEntries=1
 | `CANOPEN_WAIT_TIMEOUT_MS` | `5000` | Boot、EMCY、Heartbeat callback 或 SDO completion 最大等待时间 |
 | `CANOPEN_HEARTBEAT_PERIOD_MS` | `500` | 双方 Producer 周期 |
 | `CANOPEN_HEARTBEAT_MULTIPLIER` | `3` | Consumer 超时倍率 |
+| `CANOPEN_ENABLE_HEARTBEAT_PROCESS` | `1` | 是否注册并执行 A01 Heartbeat 验证流程 |
+| `CANOPEN_ENABLE_SDO_PROCESS` | `1` | 是否注册并执行 A02 用户 OD SDO 验证流程 |
+| `CANOPEN_ENABLE_FINAL_RESET_PROCESS` | `1` | 退出时是否执行 Reset Communication |
 
 从机的基线 Heartbeat 配置仍由 YAML、`dcfgen` 和 Lely Boot 管理。自动专项测试会临时使用 `SubmitWrite()` 将节点 1 的 `0x1017:00` 写为 0/`CANOPEN_HEARTBEAT_PERIOD_MS`，但不改变持久配置；Heartbeat 周期或倍率变化后仍必须同步更新 YAML、重新生成 DCF、构建并部署。
+
+### 自动流程开关
+
+自动验证流程由 `main.cpp` 中的静态注册表按顺序执行。对应宏设置为 `1` 时流程进入注册表，设置为 `0` 时不注册也不执行。当前顺序为：
+
+```text
+A01 Heartbeat
+A02 SDO
+```
+
+已注册流程采用 fail-fast：任一流程返回非零后，后续已注册流程不再执行。A01 和 A02 的开关相互独立，例如关闭 A01、保留 A02 时，Startup Boot 成功后会直接执行 A02。
+
+`CANOPEN_ENABLE_FINAL_RESET_PROCESS` 只控制退出阶段的 Reset Communication，不属于自动验证流程表，也不受 A01/A02 流程失败影响。三个开关均只接受 `0` 或 `1`，其他值会触发编译期断言。
 
 ## 部署
 

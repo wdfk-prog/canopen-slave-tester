@@ -4,6 +4,7 @@
  */
 
 #include "canopen_config.h"
+#include "canopen_process.h"
 #include "nmt_heartbeat.h"
 #include "sdo_process.h"
 #include "shutdown_process.h"
@@ -21,6 +22,7 @@
 #include <spdlog/sinks/stdout_color_sinks.h>
 #include <spdlog/spdlog.h>
 
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <csignal>
@@ -32,31 +34,17 @@
 #include <thread>
 
 namespace {
-
-static_assert(sizeof(CANOPEN_INTERFACE_NAME) > 1U,
-              "CANopen interface name must not be empty");
-static_assert(CANOPEN_MASTER_NODE_ID >= 1 && CANOPEN_MASTER_NODE_ID <= 127,
-              "CANopen master node-ID must be in the range 1..127");
-static_assert(CANOPEN_SLAVE_NODE_ID >= 1 && CANOPEN_SLAVE_NODE_ID <= 127,
-              "CANopen slave node-ID must be in the range 1..127");
-static_assert(CANOPEN_MASTER_NODE_ID != CANOPEN_SLAVE_NODE_ID,
-              "CANopen master and slave node-ID must differ");
-static_assert(CANOPEN_EXPECTED_BITRATE > 0,
-              "CAN bitrate must be greater than zero");
-static_assert(CANOPEN_CHANNEL_RX_QUEUE_SIZE > 0,
-              "CAN receive queue size must be greater than zero");
-static_assert(CANOPEN_WAIT_TIMEOUT_MS > 0,
-              "CANopen callback wait timeout must be greater than zero");
-static_assert(CANOPEN_HEARTBEAT_PERIOD_MS > 0
-                  && CANOPEN_HEARTBEAT_PERIOD_MS <= 65535,
-              "Heartbeat producer period must fit UNSIGNED16");
-static_assert(CANOPEN_HEARTBEAT_MULTIPLIER > 1,
-              "Heartbeat consumer multiplier must be greater than one");
-static_assert(CANOPEN_HEARTBEAT_PERIOD_MS * CANOPEN_HEARTBEAT_MULTIPLIER
-                  <= 65535,
-              "Heartbeat consumer timeout must fit UNSIGNED16");
-static_assert(CANOPEN_LOG_QUEUE_SIZE > 0 && CANOPEN_LOG_WORKER_COUNT > 0,
-              "Asynchronous logging resources must be greater than zero");
+const std::array<CanopenProcessEntry,
+                 CANOPEN_ENABLE_HEARTBEAT_PROCESS
+                     + CANOPEN_ENABLE_SDO_PROCESS>
+    g_canopen_processes = {{
+#if CANOPEN_ENABLE_HEARTBEAT_PROCESS
+        {"A01 Heartbeat", heartbeatProcess},
+#endif /* CANOPEN_ENABLE_HEARTBEAT_PROCESS */
+#if CANOPEN_ENABLE_SDO_PROCESS
+        {"A02 SDO", sdoProcess},
+#endif /* CANOPEN_ENABLE_SDO_PROCESS */
+    }};
 
 volatile std::sig_atomic_t g_stop_requested = 0;
 std::atomic<bool> g_canopen_loop_running(false);
@@ -177,19 +165,19 @@ int main(void)
 
     prepareBootWait();
     master.Reset();
-    if (!waitForBootCompletion(
-            std::chrono::milliseconds(CANOPEN_WAIT_TIMEOUT_MS))) {
+    startup_boot_succeeded = waitForBootCompletion(
+        std::chrono::milliseconds(CANOPEN_WAIT_TIMEOUT_MS));
+    if (!startup_boot_succeeded) {
         spdlog::error("Remote node did not complete Boot during startup");
         ++error_count;
     } else {
-        startup_boot_succeeded = true;
         spdlog::info("Remote node {} completed startup Boot",
                      CANOPEN_SLAVE_NODE_ID);
-        const int heartbeat_result = heartbeatProcess(master);
-        error_count += heartbeat_result;
-        if (heartbeat_result == 0) {
-            error_count += sdoProcess(master);
-        }
+    }
+
+    if (startup_boot_succeeded) {
+        error_count += canopenRunProcesses(master, g_canopen_processes.data(),
+                                           g_canopen_processes.size());
     }
 
     spdlog::info(
@@ -205,10 +193,12 @@ int main(void)
         ++error_count;
     }
 
+#if CANOPEN_ENABLE_FINAL_RESET_PROCESS
     if (g_canopen_loop_running.load(std::memory_order_acquire)
         && startup_boot_succeeded) {
         error_count += finalResetProcess(master);
     }
+#endif /* CANOPEN_ENABLE_FINAL_RESET_PROCESS */
 
     context.shutdown();
     if (canopen_thread.joinable()) {
