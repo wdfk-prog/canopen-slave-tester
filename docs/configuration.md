@@ -112,7 +112,7 @@ NrOfEntries=1
 
 ## 编译期配置
 
-运行参数仍位于 `include/canopen_config.h`：
+跨流程共享的运行参数位于 `include/canopen_config.h`：
 
 | 宏 | 默认值 | 说明 |
 | --- | ---: | --- |
@@ -121,27 +121,40 @@ NrOfEntries=1
 | `CANOPEN_MASTER_NODE_ID` | `127` | 主站 Node-ID |
 | `CANOPEN_SLAVE_NODE_ID` | `1` | 被测从机 Node-ID |
 | `CANOPEN_MASTER_DCF_PATH` | `../config/master.dcf` | 相对远端 `bin/` 的 DCF 路径 |
-| `CANOPEN_WAIT_TIMEOUT_MS` | `5000` | Boot、EMCY、Heartbeat callback 或 SDO completion 最大等待时间 |
-| `CANOPEN_HEARTBEAT_PERIOD_MS` | `500` | 双方 Producer 周期 |
-| `CANOPEN_HEARTBEAT_MULTIPLIER` | `3` | Consumer 超时倍率 |
-| `CANOPEN_ENABLE_HEARTBEAT_PROCESS` | `1` | 是否注册并执行 A01 Heartbeat 验证流程 |
-| `CANOPEN_ENABLE_SDO_PROCESS` | `1` | 是否注册并执行 A02 用户 OD SDO 验证流程 |
-| `CANOPEN_ENABLE_FINAL_RESET_PROCESS` | `1` | 退出时是否执行 Reset Communication |
+| `CANOPEN_CHANNEL_RX_QUEUE_SIZE` | `256` | SocketCAN receive queue |
+| `CANOPEN_WAIT_TIMEOUT_MS` | `5000` | Startup Boot 和 Final Reset 等公共等待时间 |
+| `CANOPEN_ENABLE_HEARTBEAT_PROCESS` | `1` | 注册并执行 A01 Heartbeat |
+| `CANOPEN_ENABLE_SDO_PROCESS` | `1` | 注册并执行 A02 SDO |
+| `CANOPEN_ENABLE_PDO_PROCESS` | `1` | 注册并执行 A03 RPDO/TPDO |
+| `CANOPEN_ENABLE_FINAL_RESET_PROCESS` | `1` | 退出时执行 Reset Communication |
+| `CANOPEN_LOG_QUEUE_SIZE` | `8192` | 异步日志队列容量 |
+| `CANOPEN_LOG_WORKER_COUNT` | `1` | 异步日志 worker 数量 |
 
-从机的基线 Heartbeat 配置仍由 YAML、`dcfgen` 和 Lely Boot 管理。自动专项测试会临时使用 `SubmitWrite()` 将节点 1 的 `0x1017:00` 写为 0/`CANOPEN_HEARTBEAT_PERIOD_MS`，但不改变持久配置；Heartbeat 周期或倍率变化后仍必须同步更新 YAML、重新生成 DCF、构建并部署。
+测试流程自己的对象索引、probe value、采样数量、周期容差和流程 timeout 不放入公共配置头。当前分别位于：
+
+```text
+A01  src/nmt_heartbeat.cpp
+A02  src/sdo_process.cpp
+A03  src/pdo_process.cpp
+```
+
+A01 当前使用 `kHeartbeatIndex=0x1017`、`kHeartbeatTimeoutMs=3000`、`kHeartbeatSampleCount=5` 和 500 ms Producer Heartbeat 周期。A02 使用 `kTestObjectIndex=0x2200`、`kProbeValue=0x12345678`，并在 probe 与原值相同时选择备用值。A03 的 PDO number、`0x2100/0x2101/0x2200`、采样策略和时序容差全部保存在 `pdo_process.cpp`。
+
+从机的基线 Heartbeat 和 PDO 参数仍由 YAML、EDS、`dcfgen` 和 Lely Boot 管理。修改真实通信参数时必须同步修改配置源并重新生成 DCF；源码中的流程私有常量只定义测试行为。
 
 ### 自动流程开关
 
-自动验证流程由 `main.cpp` 中的静态注册表按顺序执行。对应宏设置为 `1` 时流程进入注册表，设置为 `0` 时不注册也不执行。当前顺序为：
+自动验证流程由 `main.cpp` 中的静态注册表按顺序执行：
 
 ```text
 A01 Heartbeat
 A02 SDO
+A03 PDO
 ```
 
-已注册流程采用 fail-fast：任一流程返回非零后，后续已注册流程不再执行。A01 和 A02 的开关相互独立，例如关闭 A01、保留 A02 时，Startup Boot 成功后会直接执行 A02。
+对应 `CANOPEN_ENABLE_*_PROCESS` 宏为 `1` 时进入注册表，为 `0` 时不注册。流程采用 fail-fast：任一流程返回非零后，后续流程不再执行。
 
-`CANOPEN_ENABLE_FINAL_RESET_PROCESS` 只控制退出阶段的 Reset Communication，不属于自动验证流程表，也不受 A01/A02 流程失败影响。三个开关均只接受 `0` 或 `1`，其他值会触发编译期断言。
+`CANOPEN_ENABLE_FINAL_RESET_PROCESS` 只控制退出阶段的 Reset Communication，不属于自动验证流程表。
 
 ## 部署
 

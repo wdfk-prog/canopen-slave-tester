@@ -22,8 +22,11 @@
 
 namespace {
 
-constexpr std::uint16_t kProducerHeartbeatIndex = 0x1017;
-constexpr std::uint8_t kProducerHeartbeatSubindex = 0x00;
+constexpr std::uint16_t kHeartbeatIndex = 0x1017;
+constexpr std::uint8_t kHeartbeatSubindex = 0x00;
+constexpr std::uint32_t kHeartbeatTimeoutMs = 3000;
+constexpr std::uint32_t kHeartbeatSampleCount = 5;
+constexpr std::uint16_t kHeartbeatPeriodMs = 500;
 constexpr std::uint16_t kSlaveAssignmentIndex = 0x1F81;
 constexpr std::uint8_t kSlaveAssignmentSubindex = CANOPEN_SLAVE_NODE_ID;
 constexpr std::uint32_t kSlaveAssignmentEnabled = 0x00000005;
@@ -234,8 +237,8 @@ bool writeSlaveProducerHeartbeat(lely::canopen::AsyncMaster& master,
     const auto state = std::make_shared<WriteState>();
     std::error_code submit_error;
     master.SubmitWrite(
-        master.GetExecutor(), CANOPEN_SLAVE_NODE_ID, kProducerHeartbeatIndex,
-        kProducerHeartbeatSubindex, period_ms,
+        master.GetExecutor(), CANOPEN_SLAVE_NODE_ID, kHeartbeatIndex,
+        kHeartbeatSubindex, period_ms,
         [state](std::uint8_t, std::uint16_t, std::uint8_t,
                 std::error_code error) noexcept {
             {
@@ -245,7 +248,7 @@ bool writeSlaveProducerHeartbeat(lely::canopen::AsyncMaster& master,
             }
             state->condition.notify_all();
         },
-        std::chrono::milliseconds(CANOPEN_WAIT_TIMEOUT_MS), submit_error);
+        std::chrono::milliseconds(kHeartbeatTimeoutMs), submit_error);
     if (submit_error) {
         spdlog::error(
             "Unable to submit slave producer heartbeat SDO write: {}",
@@ -255,7 +258,7 @@ bool writeSlaveProducerHeartbeat(lely::canopen::AsyncMaster& master,
 
     std::unique_lock<std::mutex> lock(state->mutex);
     if (!state->condition.wait_for(
-            lock, std::chrono::milliseconds(CANOPEN_WAIT_TIMEOUT_MS),
+            lock, std::chrono::milliseconds(kHeartbeatTimeoutMs),
             [state]() { return state->completed; })) {
         spdlog::error("Slave producer heartbeat SDO write timed out");
         return false;
@@ -316,7 +319,7 @@ int testSlaveProducerHeartbeat(lely::canopen::AsyncMaster& master)
     spdlog::info("Slave producer heartbeat stopped through SDO");
 
     if (!waitForHeartbeat(
-            std::chrono::milliseconds(CANOPEN_WAIT_TIMEOUT_MS))) {
+            std::chrono::milliseconds(kHeartbeatTimeoutMs))) {
         spdlog::error("Remote heartbeat timeout event timed out");
         result = 1;
     } else {
@@ -326,14 +329,14 @@ int testSlaveProducerHeartbeat(lely::canopen::AsyncMaster& master)
     prepareHeartbeatWait(false);
     if (!writeSlaveProducerHeartbeat(
             master,
-            static_cast<std::uint16_t>(CANOPEN_HEARTBEAT_PERIOD_MS))) {
+            kHeartbeatPeriodMs)) {
         spdlog::error(
             "Slave producer heartbeat may remain disabled until reset");
         result = 1;
     } else {
         spdlog::info("Slave producer heartbeat restored through SDO");
         if (!waitForHeartbeat(
-                std::chrono::milliseconds(CANOPEN_WAIT_TIMEOUT_MS))) {
+                std::chrono::milliseconds(kHeartbeatTimeoutMs))) {
             spdlog::error("Remote heartbeat recovery event timed out");
             result = 1;
         } else {
@@ -382,11 +385,11 @@ int heartbeatProcess(lely::canopen::AsyncMaster& master)
     // Allow the slave Heartbeat consumer to receive a normal master
     // Heartbeat and enter ACTIVE before testing timeout detection.
     std::this_thread::sleep_for(std::chrono::milliseconds(
-        CANOPEN_HEARTBEAT_PERIOD_MS * 2));
+        kHeartbeatPeriodMs * kHeartbeatSampleCount));
 
     prepareEmcyWait(kHeartbeatConsumerEmcyCode);
-    master.Write<std::uint16_t>(kProducerHeartbeatIndex,
-                                kProducerHeartbeatSubindex,
+    master.Write<std::uint16_t>(kHeartbeatIndex,
+                                kHeartbeatSubindex,
                                 static_cast<std::uint16_t>(0), error);
     if (error) {
         spdlog::error("Unable to stop master producer heartbeat: {}",
@@ -395,7 +398,7 @@ int heartbeatProcess(lely::canopen::AsyncMaster& master)
     }
     spdlog::info("Master producer heartbeat stopped");
 
-    if (!waitForEmcy(std::chrono::milliseconds(CANOPEN_WAIT_TIMEOUT_MS))) {
+    if (!waitForEmcy(std::chrono::milliseconds(kHeartbeatTimeoutMs))) {
         spdlog::error("Heartbeat consumer EMCY 0x8130 timed out");
         result = 1;
     } else {
@@ -405,8 +408,8 @@ int heartbeatProcess(lely::canopen::AsyncMaster& master)
     prepareEmcyWait(kEmcyResetCode);
     error.clear();
     master.Write<std::uint16_t>(
-        kProducerHeartbeatIndex, kProducerHeartbeatSubindex,
-        static_cast<std::uint16_t>(CANOPEN_HEARTBEAT_PERIOD_MS), error);
+        kHeartbeatIndex, kHeartbeatSubindex,
+        kHeartbeatPeriodMs, error);
     if (error) {
         spdlog::error("Unable to restore master producer heartbeat: {}",
                       error.message());
@@ -414,7 +417,7 @@ int heartbeatProcess(lely::canopen::AsyncMaster& master)
     }
     spdlog::info("Master producer heartbeat restored");
 
-    if (!waitForEmcy(std::chrono::milliseconds(CANOPEN_WAIT_TIMEOUT_MS))) {
+    if (!waitForEmcy(std::chrono::milliseconds(kHeartbeatTimeoutMs))) {
         spdlog::error("Heartbeat consumer EMCY reset timed out");
         return 1;
     }

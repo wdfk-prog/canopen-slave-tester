@@ -6,6 +6,7 @@
 #include "canopen_config.h"
 #include "canopen_process.h"
 #include "nmt_heartbeat.h"
+#include "pdo_process.h"
 #include "sdo_process.h"
 #include "shutdown_process.h"
 
@@ -36,7 +37,8 @@
 namespace {
 const std::array<CanopenProcessEntry,
                  CANOPEN_ENABLE_HEARTBEAT_PROCESS
-                     + CANOPEN_ENABLE_SDO_PROCESS>
+                     + CANOPEN_ENABLE_SDO_PROCESS
+                     + CANOPEN_ENABLE_PDO_PROCESS>
     g_canopen_processes = {{
 #if CANOPEN_ENABLE_HEARTBEAT_PROCESS
         {"A01 Heartbeat", heartbeatProcess},
@@ -44,6 +46,9 @@ const std::array<CanopenProcessEntry,
 #if CANOPEN_ENABLE_SDO_PROCESS
         {"A02 SDO", sdoProcess},
 #endif /* CANOPEN_ENABLE_SDO_PROCESS */
+#if CANOPEN_ENABLE_PDO_PROCESS
+        {"A03 PDO", pdoProcess},
+#endif /* CANOPEN_ENABLE_PDO_PROCESS */
     }};
 
 volatile std::sig_atomic_t g_stop_requested = 0;

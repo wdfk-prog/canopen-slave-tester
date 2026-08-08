@@ -23,15 +23,12 @@
 #define CANOPEN_CHANNEL_RX_QUEUE_SIZE 256
 /** Maximum wait for Boot or NMT callback events. */
 #define CANOPEN_WAIT_TIMEOUT_MS 5000
-/** Producer Heartbeat period used in both directions. */
-#define CANOPEN_HEARTBEAT_PERIOD_MS 500
-/** Consumer timeout multiplier relative to the producer period. */
-#define CANOPEN_HEARTBEAT_MULTIPLIER 3
-
 /** Enable the A01 bidirectional Heartbeat verification process. */
 #define CANOPEN_ENABLE_HEARTBEAT_PROCESS 1
 /** Enable the A02 user OD SDO verification process. */
 #define CANOPEN_ENABLE_SDO_PROCESS 1
+/** Enable the A03 RPDO/TPDO verification process. */
+#define CANOPEN_ENABLE_PDO_PROCESS 1
 /** Enable Reset Communication during application shutdown. */
 #define CANOPEN_ENABLE_FINAL_RESET_PROCESS 1
 

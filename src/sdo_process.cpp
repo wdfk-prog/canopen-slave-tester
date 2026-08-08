@@ -21,10 +21,10 @@
 
 namespace {
 
-constexpr std::uint16_t kControlValueIndex = 0x2200;
-constexpr std::uint8_t kControlValueSubindex = 0x00;
-constexpr std::uint32_t kPrimaryTestValue = 0x12345678;
-constexpr std::uint32_t kAlternateTestValue = 0x87654321;
+constexpr std::uint16_t kTestObjectIndex = 0x2200;
+constexpr std::uint8_t kTestObjectSubindex = 0x00;
+constexpr std::uint32_t kProbeValue = 0x12345678;
+constexpr std::uint32_t kAlternateProbeValue = 0x87654321;
 constexpr int kCompletionMarginMs = 500;
 
 enum class SdoOperationResult {
@@ -55,8 +55,8 @@ SdoOperationResult readControlValue(lely::canopen::AsyncMaster& master,
     const auto state = std::make_shared<ReadState>();
     std::error_code submit_error;
     master.SubmitRead<std::uint32_t>(
-        master.GetExecutor(), CANOPEN_SLAVE_NODE_ID, kControlValueIndex,
-        kControlValueSubindex,
+        master.GetExecutor(), CANOPEN_SLAVE_NODE_ID, kTestObjectIndex,
+        kTestObjectSubindex,
         [state](std::uint8_t, std::uint16_t, std::uint8_t,
                 std::error_code error, std::uint32_t read_value) noexcept {
             {
@@ -121,8 +121,8 @@ SdoOperationResult writeControlValue(lely::canopen::AsyncMaster& master,
     const auto state = std::make_shared<WriteState>();
     std::error_code submit_error;
     master.SubmitWrite(
-        master.GetExecutor(), CANOPEN_SLAVE_NODE_ID, kControlValueIndex,
-        kControlValueSubindex, value,
+        master.GetExecutor(), CANOPEN_SLAVE_NODE_ID, kTestObjectIndex,
+        kTestObjectSubindex, value,
         [state](std::uint8_t, std::uint16_t, std::uint8_t,
                 std::error_code error) noexcept {
             {
@@ -221,8 +221,7 @@ int sdoProcess(lely::canopen::AsyncMaster& master)
                  original_value);
 
     const std::uint32_t test_value =
-        original_value == kPrimaryTestValue ? kAlternateTestValue
-                                            : kPrimaryTestValue;
+        original_value == kProbeValue ? kAlternateProbeValue : kProbeValue;
     const SdoOperationResult test_write_result =
         writeControlValue(master, test_value);
     if (test_write_result == SdoOperationResult::WAIT_TIMEOUT) {
