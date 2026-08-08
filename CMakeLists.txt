@@ -132,10 +132,13 @@ endforeach()
 
 set(TARGET_NAME canopen_master)
 
+file(GLOB CANOPEN_MASTER_SOURCES CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp"
+)
+
 add_executable(${TARGET_NAME}
-    src/main.cpp
-    src/nmt_heartbeat.cpp
-    src/shutdown_process.cpp)
+    ${CANOPEN_MASTER_SOURCES}
+)
 
 target_include_directories(${TARGET_NAME}
     PRIVATE

@@ -5,6 +5,7 @@
 
 #include "canopen_config.h"
 #include "nmt_heartbeat.h"
+#include "sdo_process.h"
 #include "shutdown_process.h"
 
 #include <lely/coapp/master.hpp>
@@ -184,12 +185,15 @@ int main(void)
         startup_boot_succeeded = true;
         spdlog::info("Remote node {} completed startup Boot",
                      CANOPEN_SLAVE_NODE_ID);
-        error_count += heartbeatProcess(master);
+        const int heartbeat_result = heartbeatProcess(master);
+        error_count += heartbeat_result;
+        if (heartbeat_result == 0) {
+            error_count += sdoProcess(master);
+        }
     }
 
     spdlog::info(
-        "Automatic bidirectional Heartbeat test finished; waiting for "
-        "Ctrl+C");
+        "Automatic CANopen tests finished; waiting for Ctrl+C");
     while (g_stop_requested == 0
            && g_canopen_loop_running.load(std::memory_order_acquire)) {
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
