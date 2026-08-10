@@ -6,36 +6,26 @@
 #include "sdo_process.h"
 
 #include "canopen_config.h"
+#include "canopen_sdo.h"
 
 #include <lely/coapp/master.hpp>
-#include <lely/coapp/sdo_error.hpp>
-
 #include <spdlog/spdlog.h>
 
-#include <chrono>
-#include <condition_variable>
 #include <cstdint>
-#include <memory>
-#include <mutex>
-#include <system_error>
 
 namespace {
 
+/** User OD object selected as the reversible SDO read/write test target. */
 constexpr std::uint16_t kTestObjectIndex = 0x2200;
+/** The demo control object is scalar and therefore uses sub-index zero. */
 constexpr std::uint8_t kTestObjectSubindex = 0x00;
+/** Primary probe pattern chosen to make byte-order mistakes visually obvious. */
 constexpr std::uint32_t kProbeValue = 0x12345678;
+/** Alternate probe avoids accidentally writing the value that was already
+ * present before the test. */
 constexpr std::uint32_t kAlternateProbeValue = 0x87654321;
-constexpr int kCompletionMarginMs = 500;
-
-enum class SdoOperationResult {
-    SUCCESS,
-    FAILED,
-    SDO_TIMEOUT,
-    WAIT_TIMEOUT,
-};
-
 /**
- * @brief Read the slave user control value through SDO.
+ * @brief Read the slave user control value through the common remote SDO helper.
  *
  * @param master Active Lely asynchronous CANopen master.
  * @param value Receives the value read from 0x2200:00 on success.
@@ -44,65 +34,13 @@ enum class SdoOperationResult {
 SdoOperationResult readControlValue(lely::canopen::AsyncMaster& master,
                                     std::uint32_t& value)
 {
-    struct ReadState {
-        std::mutex mutex;
-        std::condition_variable condition;
-        bool completed = false;
-        std::error_code error;
-        std::uint32_t value = 0;
-    };
-
-    const auto state = std::make_shared<ReadState>();
-    std::error_code submit_error;
-    master.SubmitRead<std::uint32_t>(
-        master.GetExecutor(), CANOPEN_SLAVE_NODE_ID, kTestObjectIndex,
-        kTestObjectSubindex,
-        [state](std::uint8_t, std::uint16_t, std::uint8_t,
-                std::error_code error, std::uint32_t read_value) noexcept {
-            {
-                std::lock_guard<std::mutex> lock(state->mutex);
-                state->completed = true;
-                state->error = error;
-                state->value = read_value;
-            }
-            state->condition.notify_all();
-        },
-        std::chrono::milliseconds(CANOPEN_WAIT_TIMEOUT_MS), submit_error);
-    if (submit_error) {
-        spdlog::error("Unable to submit SDO read for 0x2200:00: {}",
-                      submit_error.message());
-        return SdoOperationResult::FAILED;
-    }
-
-    std::unique_lock<std::mutex> lock(state->mutex);
-    if (!state->condition.wait_for(
-            lock,
-            std::chrono::milliseconds(CANOPEN_WAIT_TIMEOUT_MS
-                                      + kCompletionMarginMs),
-            [state]() { return state->completed; })) {
-        spdlog::error(
-            "SDO read completion for 0x2200:00 timed out; remote state is "
-            "unknown");
-        return SdoOperationResult::WAIT_TIMEOUT;
-    }
-    if (state->error) {
-        if (lely::canopen::sdo_errc(state->error)
-            == lely::canopen::SdoErrc::TIMEOUT) {
-            spdlog::error("SDO read for 0x2200:00 timed out: {}",
-                          state->error.message());
-            return SdoOperationResult::SDO_TIMEOUT;
-        }
-        spdlog::error("SDO read for 0x2200:00 failed: {}",
-                      state->error.message());
-        return SdoOperationResult::FAILED;
-    }
-
-    value = state->value;
-    return SdoOperationResult::SUCCESS;
+    return readRemoteSdo<std::uint32_t>(
+        master, CANOPEN_SLAVE_NODE_ID, kTestObjectIndex,
+        kTestObjectSubindex, value);
 }
 
 /**
- * @brief Write the slave user control value through SDO.
+ * @brief Write the slave user control value through the common remote SDO helper.
  *
  * @param master Active Lely asynchronous CANopen master.
  * @param value Value written to 0x2200:00.
@@ -111,58 +49,9 @@ SdoOperationResult readControlValue(lely::canopen::AsyncMaster& master,
 SdoOperationResult writeControlValue(lely::canopen::AsyncMaster& master,
                                      std::uint32_t value)
 {
-    struct WriteState {
-        std::mutex mutex;
-        std::condition_variable condition;
-        bool completed = false;
-        std::error_code error;
-    };
-
-    const auto state = std::make_shared<WriteState>();
-    std::error_code submit_error;
-    master.SubmitWrite(
-        master.GetExecutor(), CANOPEN_SLAVE_NODE_ID, kTestObjectIndex,
-        kTestObjectSubindex, value,
-        [state](std::uint8_t, std::uint16_t, std::uint8_t,
-                std::error_code error) noexcept {
-            {
-                std::lock_guard<std::mutex> lock(state->mutex);
-                state->completed = true;
-                state->error = error;
-            }
-            state->condition.notify_all();
-        },
-        std::chrono::milliseconds(CANOPEN_WAIT_TIMEOUT_MS), submit_error);
-    if (submit_error) {
-        spdlog::error("Unable to submit SDO write for 0x2200:00: {}",
-                      submit_error.message());
-        return SdoOperationResult::FAILED;
-    }
-
-    std::unique_lock<std::mutex> lock(state->mutex);
-    if (!state->condition.wait_for(
-            lock,
-            std::chrono::milliseconds(CANOPEN_WAIT_TIMEOUT_MS
-                                      + kCompletionMarginMs),
-            [state]() { return state->completed; })) {
-        spdlog::error(
-            "SDO write completion for 0x2200:00 timed out; remote state is "
-            "unknown");
-        return SdoOperationResult::WAIT_TIMEOUT;
-    }
-    if (state->error) {
-        if (lely::canopen::sdo_errc(state->error)
-            == lely::canopen::SdoErrc::TIMEOUT) {
-            spdlog::error("SDO write for 0x2200:00 timed out: {}",
-                          state->error.message());
-            return SdoOperationResult::SDO_TIMEOUT;
-        }
-        spdlog::error("SDO write for 0x2200:00 failed: {}",
-                      state->error.message());
-        return SdoOperationResult::FAILED;
-    }
-
-    return SdoOperationResult::SUCCESS;
+    return writeRemoteSdo<std::uint32_t>(
+        master, CANOPEN_SLAVE_NODE_ID, kTestObjectIndex,
+        kTestObjectSubindex, value);
 }
 
 /**
@@ -175,6 +64,8 @@ SdoOperationResult writeControlValue(lely::canopen::AsyncMaster& master,
 SdoOperationResult restoreControlValue(lely::canopen::AsyncMaster& master,
                                        std::uint32_t original_value)
 {
+    /* First restore the saved value; a protocol timeout still permits a
+     * read-back because the callback completed and the SDO channel is known. */
     const SdoOperationResult write_result =
         writeControlValue(master, original_value);
     if (write_result == SdoOperationResult::WAIT_TIMEOUT
@@ -187,7 +78,10 @@ SdoOperationResult restoreControlValue(lely::canopen::AsyncMaster& master,
             "Restore SDO response timed out; verifying 0x2200:00 by read-back");
     }
 
+    /* Zero is only a neutral placeholder; successful read-back overwrites it
+     * before comparison with the saved original value. */
     std::uint32_t restored_value = 0;
+    /* Keep the read result separate so timeout class controls cleanup policy. */
     const SdoOperationResult read_result =
         readControlValue(master, restored_value);
     if (read_result != SdoOperationResult::SUCCESS) {
@@ -211,7 +105,11 @@ SdoOperationResult restoreControlValue(lely::canopen::AsyncMaster& master,
 
 int sdoProcess(lely::canopen::AsyncMaster& master)
 {
+    /* Step 1: save the current object value before making any reversible test
+     * modification. Zero is only initial storage until the SDO upload ends. */
     std::uint32_t original_value = 0;
+    /* Preserve the exact failure class because WAIT_TIMEOUT has stricter
+     * cleanup rules than a normal SDO abort/timeout. */
     const SdoOperationResult initial_read_result =
         readControlValue(master, original_value);
     if (initial_read_result != SdoOperationResult::SUCCESS) {
@@ -220,8 +118,11 @@ int sdoProcess(lely::canopen::AsyncMaster& master)
     spdlog::info("A02 SDO user OD test started: original 0x2200:00=0x{:08x}",
                  original_value);
 
+    /* Step 2: select a value guaranteed to differ from the saved value so the
+     * test proves that a write actually changed the remote OD entry. */
     const std::uint32_t test_value =
         original_value == kProbeValue ? kAlternateProbeValue : kProbeValue;
+    /* Submit the reversible test write and retain its precise completion state. */
     const SdoOperationResult test_write_result =
         writeControlValue(master, test_value);
     if (test_write_result == SdoOperationResult::WAIT_TIMEOUT) {
@@ -246,9 +147,15 @@ int sdoProcess(lely::canopen::AsyncMaster& master)
         return 1;
     }
 
+    /* Step 3: read the temporary value back. result starts at success and is
+     * retained through restoration so cleanup still runs after assertions. */
     int result = 0;
+    /* false means the SDO channel completion state is still known and cleanup
+     * transactions may be issued safely. */
     bool completion_wait_timed_out = false;
+    /* Neutral storage overwritten by a successful SDO upload. */
     std::uint32_t read_back_value = 0;
+    /* Store the exact read outcome for value and cleanup decisions. */
     const SdoOperationResult read_back_result =
         readControlValue(master, read_back_value);
     if (read_back_result == SdoOperationResult::WAIT_TIMEOUT) {
@@ -275,6 +182,8 @@ int sdoProcess(lely::canopen::AsyncMaster& master)
         return 1;
     }
 
+    /* Step 4: restore and independently verify the original value before the
+     * process can report PASS. */
     const SdoOperationResult restore_result =
         restoreControlValue(master, original_value);
     if (restore_result != SdoOperationResult::SUCCESS) {

@@ -6,6 +6,9 @@
 #ifndef SDO_PROCESS_H
 #define SDO_PROCESS_H
 
+/** Enable the A02 user OD SDO verification process. */
+#define CANOPEN_ENABLE_SDO_PROCESS 1
+
 namespace lely {
 namespace canopen {
 class AsyncMaster;

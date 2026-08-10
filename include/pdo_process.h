@@ -6,6 +6,9 @@
 #ifndef PDO_PROCESS_H
 #define PDO_PROCESS_H
 
+/** Enable the A03 RPDO/TPDO verification process. */
+#define CANOPEN_ENABLE_PDO_PROCESS 1
+
 namespace lely {
 namespace canopen {
 class AsyncMaster;

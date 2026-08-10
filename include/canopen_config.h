@@ -1,6 +1,12 @@
 /**
  * @file
- * @brief CANopen master compile-time configuration.
+ * @brief CANopen master compile-time configuration shared across subsystems.
+ *
+ * @note Keep only settings whose semantics are shared by multiple CANopen
+ *       modules or are intrinsic to the main runtime in this header. A setting
+ *       remains module-owned when main.cpp only consumes it to register or
+ *       enable that module. Protocol-specific and process-specific settings
+ *       must be declared in the corresponding module header.
  */
 
 #ifndef CANOPEN_CONFIG_H
@@ -23,14 +29,6 @@
 #define CANOPEN_CHANNEL_RX_QUEUE_SIZE 256
 /** Maximum wait for Boot or NMT callback events. */
 #define CANOPEN_WAIT_TIMEOUT_MS 5000
-/** Enable the A01 bidirectional Heartbeat verification process. */
-#define CANOPEN_ENABLE_HEARTBEAT_PROCESS 1
-/** Enable the A02 user OD SDO verification process. */
-#define CANOPEN_ENABLE_SDO_PROCESS 1
-/** Enable the A03 RPDO/TPDO verification process. */
-#define CANOPEN_ENABLE_PDO_PROCESS 1
-/** Enable Reset Communication during application shutdown. */
-#define CANOPEN_ENABLE_FINAL_RESET_PROCESS 1
 
 /** Asynchronous spdlog queue capacity. */
 #define CANOPEN_LOG_QUEUE_SIZE 8192

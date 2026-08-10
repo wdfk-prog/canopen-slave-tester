@@ -6,6 +6,9 @@
 #ifndef SHUTDOWN_PROCESS_H
 #define SHUTDOWN_PROCESS_H
 
+/** Enable Reset Communication during application shutdown. */
+#define CANOPEN_ENABLE_FINAL_RESET_PROCESS 1
+
 namespace lely {
 namespace canopen {
 class AsyncMaster;

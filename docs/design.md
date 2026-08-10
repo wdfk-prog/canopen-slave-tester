@@ -1,8 +1,8 @@
-# A01-A03 自动测试设计
+# A01-A04 自动测试设计
 
 ## 设计边界
 
-当前自动流程直接复用单个 `lely::canopen::AsyncMaster`，不创建 `BasicDriver`、`SlaveSession` 或重复协议 Service。`main.cpp` 只负责 Lely/SocketCAN 生命周期、Startup Boot、流程注册和退出；A01/A02/A03 各自持有测试私有参数、等待状态和断言逻辑。
+当前自动流程直接复用单个 `lely::canopen::AsyncMaster`，不创建 `BasicDriver`、`SlaveSession` 或重复协议 Service。`main.cpp` 只负责 Lely/SocketCAN 生命周期、Startup Boot、流程注册和退出；A01/A02/A03/A04 各自持有测试私有参数、等待状态和断言逻辑。
 
 当前顺序：
 
@@ -11,6 +11,7 @@ Startup Boot
 → A01 Heartbeat
 → A02 SDO
 → A03 PDO
+→ A04 SYNC PDO
 → 等待 Ctrl+C/SIGTERM
 → Final Reset Communication
 ```
@@ -25,7 +26,7 @@ src/main.cpp
 ├─ 注册 CAN/Boot/Heartbeat/EMCY callback
 ├─ 启动 Loop::run() 工作线程
 ├─ Reset 并等待 Startup Boot
-├─ canopenRunProcesses(A01, A02, A03)
+├─ canopenRunProcesses(A01, A02, A03, A04)
 ├─ 等待退出信号
 ├─ finalResetProcess()
 └─ shutdown Context 并 join 线程
@@ -47,6 +48,13 @@ src/pdo_process.cpp
 ├─ TPDO1 payload/周期/映射/OD 一致性检查
 ├─ Lely TpdoMapped() RPDO1 发送
 └─ 0x2200:00 保存、回读和恢复
+
+src/sync_pdo_process.cpp
+├─ A04 私有 SYNC/PDO/时序参数
+├─ 0x1005/0x1019 producer-consumer 拓扑校验
+├─ TPDO1 0x1800 参数保存、同步切换与恢复
+├─ OnSync/OnRpdo 同步时序观测
+└─ 恢复后事件型 TPDO1 周期验证
 
 src/shutdown_process.cpp
 └─ Reset Communication 并等待 Boot callback
@@ -84,6 +92,16 @@ TPDO tolerance = +/-150 ms
 RPDO probe = 0xA5A5A5A5 / alternate 0x5A5A5A5A
 ```
 
+A04 当前私有参数包括：
+
+```text
+SYNC period = 200 ms
+SYNC samples = 5
+TPDO1 temporary transmission type = 1
+quiet window >= 1500 ms
+restored event timer tolerance = +/-150 ms
+```
+
 `master.yml`、EDS 和 DCF 继续负责真正的 CANopen 通信参数；源码私有常量只描述测试策略，不替代 DCF 配置。
 
 ## Startup Boot
@@ -98,7 +116,7 @@ RPDO probe = 0xA5A5A5A5 / alternate 0x5A5A5A5A
 → waitForBootCompletion()
 ```
 
-Boot callback `status == 0` 或 `status == 'L'` 视为可继续自动流程。其他结果或等待超时阻止 A01-A03。
+Boot callback `status == 0` 或 `status == 'L'` 视为可继续自动流程。其他结果或等待超时阻止 A01-A04。
 
 ## A01 Heartbeat
 
@@ -215,6 +233,56 @@ TpdoMapped(node 1)[0x2200][0].Write(probe)
 
 A03 结束时只注销 `OnRpdo()`/`OnTpdo()` callback；本地主站保持 Operational，供后续 PDO/SYNC 等自动阶段继续使用。实机验证表明将本地主站切回 Pre-operational 会触发 Lely master boot 管理并广播 Reset Communication，因此阶段清理不得执行该状态回退。
 
+## A04 SYNC 与同步 TPDO
+
+A04 复用 A03 后保持 Operational 的本地主站，但也能在 A03 被编译关闭时自行向 Node-ID 127 发送本地 NMT Start。测试前先读取：
+
+```text
+slave  0x1005 / 0x1019
+master 0x1005 / 0x1006 / 0x1019
+```
+
+必须满足：
+
+- 主站 `0x1005` producer bit 为 1；
+- 从机 `0x1005` producer bit 为 0，即保持 SYNC consumer；
+- 主从 SYNC COB-ID/帧格式一致；
+- 主从 `0x1019` 一致且当前为 0，不使用 SYNC counter byte。
+
+该检查用于区分“固件具备 `PKG_CANOPENNODE_SYNC_PRODUCER` 能力”和“当前节点实际作为 producer 运行”。A04 不允许主从同时成为 SYNC producer。
+
+随后进入：
+
+```text
+slave -> Pre-operational + fresh OnState(PREOP) confirmation
+→ save 0x1800:00/01/02/03/05/06
+→ disable TPDO1 by 0x1800:01 bit31
+→ 0x1800:02 = 1
+→ restore valid 0x1800:01
+→ read-back COB-ID/type
+→ register OnSync/OnRpdo/OnSyncError
+→ slave -> Operational
+```
+
+本地主站先写本地 `0x1006=0`，在至少 `max(1500 ms, original_event_timer + 300 ms)` 的无 SYNC 窗口内要求 SYNC 和 TPDO1 都为 0。这样可以证明原来的 event timer 不会在同步 transmission type 下继续触发 TPDO。
+
+之后本地主站通过 Lely 本地 OD 写 `0x1006=200000 us` 启动 SYNC producer。`OnSync()` 记录每个 SYNC 时间戳；第五个 SYNC callback 将本地 `0x1006` 写回 0，停止周期发送。`OnRpdo(PDO1)` 记录从机同步 TPDO1。通过条件：
+
+```text
+SYNC count = 5
+TPDO1 count = 5
+SYNC[i] <= TPDO1[i] < SYNC[i+1]  (i=0..3)
+SYNC[4] <= TPDO1[4] < SYNC[4] + 200 ms
+```
+
+再等待一个 SYNC period，数量必须保持 5/5，排除额外发送。
+
+清理时先停止本地主站 SYNC，再向从机发送 Enter Pre-operational，并等待新的 `OnState(PREOP)` 远端状态事件；确认后才按 disable/restore-type/enable 顺序恢复 TPDO1。随后回读 `0x1800:00/01/02/03/05/06`，必须与原快照逐项一致，并确认从机 `0x1005` 未变化。最后从机重新进入 Operational，在无 SYNC 条件下接收两个 TPDO1，并验证二者间隔等于原 event timer `+/-150 ms`。本地主站 `0x1006` 最终恢复为进入 A04 前保存的值。
+
+从第一笔 TPDO1 修改型 SDO 发起前开始，A04 即把从机视为“可能已修改”，因为 local completion wait timeout 不能证明远端没有执行写入。正常清理只有在进入 Pre-operational、disable/restore-type/enable 写入以及 `0x1800:00/01/02/03/05/06` 与 `0x1005` 全量回读全部成功后，才设置 restoration verified。若发生 WAIT_TIMEOUT、普通 SDO abort/timeout、NMT Pre-operational 失败或恢复回读不一致，只要 restoration 尚未验证，A04 都会停止本地主站 SYNC，并以一次有界的从机 Reset Communication 作为更强恢复边界。Lely 对 mandatory slave 的 Boot 管理可能在 Reset Communication 后自动把节点带回 Operational（Boot callback 可报告 `status='L'`），因此 recovery 在 Boot 完成后会再次明确发送 Enter Pre-operational，并等待新的 `OnState(PREOP)` 状态事件后再重新全量回读；仅 `master.Command()` 接受命令不能视为状态已经切换。只有 restoration verified 后 Step 16 才允许最终 NMT Start。即使 Reset 恢复成功，本次 A04 仍保持 FAIL；若 Reset/Boot/Pre-operational/回读再次失败，则明确报告恢复未验证并拒绝显式 NMT Start。
+
+NMT 状态确认存在一个已知且当前接受的极低概率并发边界。`issueNmtCommandAndWaitForState()` 的 generation 只能排除在命令基线之前**已经发布到缓存**的旧状态；Lely `OnState()` 本身没有 command token，因此如果一个旧的 `PREOP` callback 在本次 `ENTER_PREOP` 之前已经进入分发，但恰好阻塞在 `g_nmt_state_mutex`，它仍可能在 `Command()` 之后才发布并递增 generation，从而被当作新的 PREOP 证据。该窗口要求非常特定的线程调度顺序，当前没有实机证据或稳定复现，项目选择不为此引入额外 command epoch、第二套回调队列或更复杂的同步状态机。后续审查不把该理论竞态作为必须修复项；只有出现实际日志证据、目标板复现或相关功能异常时才重新评估。
+
 ## 退出
 
 收到 `SIGINT` 或 `SIGTERM` 后：
@@ -227,7 +295,7 @@ finalResetProcess(master)
 → join event-loop thread
 ```
 
-由于 `boot:true`，Final Reset 会再次执行节点配置。主站随后退出导致节点 1 检测到主站 Heartbeat 丢失，属于真实离线行为，不计入 A01-A03 自动测试结果。
+由于 `boot:true`，Final Reset 会再次执行节点配置。主站随后退出导致节点 1 检测到主站 Heartbeat 丢失，属于真实离线行为，不计入 A01-A04 自动测试结果。
 
 ## 兼容性和影响范围
 
@@ -237,4 +305,5 @@ finalResetProcess(master)
 - 不改变 CAN 接口、Node-ID、目标部署目录或 CMake target；
 - A01 的等待参数改为流程私有常量，其中 callback/SDO wait 为 3000 ms，稳定等待为 5 个 500 ms 周期；
 - A02 测试对象和 probe value 改为流程私有命名；
-- 新增 A03 流程开关和 `pdoProcess()` 工程内部接口。
+- 新增 A03 流程开关和 `pdoProcess()` 工程内部接口；
+- 新增 A04 流程开关和 `syncPdoProcess()` 工程内部接口；A04 只临时修改运行期 `0x1800` 和主站本地 `0x1006`，不修改 EDS/DCF。

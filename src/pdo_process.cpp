@@ -6,10 +6,10 @@
 #include "pdo_process.h"
 
 #include "canopen_config.h"
+#include "canopen_nmt.h"
+#include "canopen_sdo.h"
 
 #include <lely/coapp/master.hpp>
-#include <lely/coapp/sdo_error.hpp>
-
 #include <spdlog/spdlog.h>
 
 #include <algorithm>
@@ -19,7 +19,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
-#include <exception>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -27,67 +26,83 @@
 
 namespace {
 
+/** PDO number 1 is the only PDO exercised by the current demo OD. */
 constexpr int kPdoNumber = 1;
 
+/** First TPDO1-mapped UNSIGNED32 object. */
 constexpr std::uint16_t kTpdoValue1Index = 0x2100;
+/** 0x2100 is a scalar demo object, therefore sub-index zero is used. */
 constexpr std::uint8_t kTpdoValue1Subindex = 0x00;
+/** Second TPDO1-mapped UNSIGNED32 object. */
 constexpr std::uint16_t kTpdoValue2Index = 0x2101;
+/** 0x2101 is a scalar demo object, therefore sub-index zero is used. */
 constexpr std::uint8_t kTpdoValue2Subindex = 0x00;
+/** RPDO1-mapped writable demo object used for delivery verification. */
 constexpr std::uint16_t kRpdoTestIndex = 0x2200;
+/** 0x2200 is scalar in the current demo OD. */
 constexpr std::uint8_t kRpdoTestSubindex = 0x00;
 
+/** Primary RPDO probe pattern with alternating nibbles for easy diagnosis. */
 constexpr std::uint32_t kRpdoProbeValue = 0xA5A5A5A5;
+/** Alternate probe guarantees the transmitted value differs from the saved
+ * value when the object already contains the primary pattern. */
 constexpr std::uint32_t kRpdoAlternateValue = 0x5A5A5A5A;
+/** Five TPDO frames provide four timing intervals for periodicity checking. */
 constexpr std::size_t kTpdoSampleCount = 5;
+/** Default demo TPDO1 event timer configured by the generated DCF. */
 constexpr std::uint32_t kTpdoPeriodMs = 1000;
+/** Allows host scheduling and CAN arbitration jitter without masking large
+ * TPDO period errors. */
 constexpr std::uint32_t kTpdoToleranceMs = 150;
+/** Collection timeout includes two extra event periods so startup phase and
+ * scheduling jitter do not create false failures. */
 constexpr std::uint32_t kTpdoCollectionTimeoutMs =
     (static_cast<std::uint32_t>(kTpdoSampleCount) + 2U) * kTpdoPeriodMs;
+/** RPDO send callback should complete well inside two seconds on this bus. */
 constexpr std::uint32_t kRpdoTransmitTimeoutMs = 2000;
-constexpr std::uint32_t kSdoTimeoutMs = 5000;
-constexpr std::uint32_t kSdoCompletionMarginMs = 500;
+/** Retry a TPDO/OD consistency snapshot when a new TPDO races the SDO reads. */
 constexpr unsigned int kConsistencyRetryCount = 3;
+/** TPDO1 maps two UNSIGNED32 values and therefore carries eight bytes. */
 constexpr std::size_t kTpdoPayloadLength = 8;
+/** RPDO1 maps one UNSIGNED32 value and therefore carries four bytes. */
 constexpr std::size_t kRpdoPayloadLength = 4;
 
+/** Monotonic clock used for interval measurements unaffected by wall time. */
 using Clock = std::chrono::steady_clock;
+/** Lely PDO callback signature used when unregistering A03 callbacks. */
 using PdoCallback =
     std::function<void(int, std::error_code, const void*, std::size_t)>;
 
-enum class SdoOperationResult {
-    SUCCESS,
-    FAILED,
-    SDO_TIMEOUT,
-    WAIT_TIMEOUT,
-};
-
+/** One validated TPDO1 observation captured by the receive callback. */
 struct TpdoSample {
-    std::array<std::uint8_t, kTpdoPayloadLength> payload{};
-    std::size_t length = 0;
-    Clock::time_point timestamp{};
+    std::array<std::uint8_t, kTpdoPayloadLength> payload{}; /**< Zero-filled copy of payload bytes. */
+    std::size_t length = 0; /**< Zero until callback stores the received DLC. */
+    Clock::time_point timestamp{}; /**< Monotonic receive time; epoch default until filled. */
 };
 
+/** Shared TPDO receive state written by the event loop and read by A03. */
 struct TpdoReceiveState {
-    std::mutex mutex;
-    std::condition_variable condition;
-    std::array<TpdoSample, kTpdoSampleCount> samples{};
-    std::size_t sample_count = 0;
-    std::size_t generation = 0;
-    TpdoSample latest{};
-    bool failed = false;
-    bool null_payload = false;
-    std::size_t invalid_length = 0;
-    std::error_code error;
+    std::mutex mutex; /**< Protects all callback-published fields. */
+    std::condition_variable condition; /**< Wakes waits on sample/failure changes. */
+    std::array<TpdoSample, kTpdoSampleCount> samples{}; /**< First sample window, zero-initialized. */
+    std::size_t sample_count = 0; /**< Number of valid entries stored in samples. */
+    std::size_t generation = 0; /**< Monotonic counter incremented for every valid TPDO1. */
+    TpdoSample latest{}; /**< Most recent valid frame for OD consistency checks. */
+    bool failed = false; /**< false until callback detects invalid input/error. */
+    bool null_payload = false; /**< Records nonzero-length callback with null data. */
+    std::size_t invalid_length = 0; /**< Zero before failure; stores callback-reported DLC on invalid TPDO input. */
+    std::error_code error; /**< Default success; callback stores Lely processing error. */
 };
 
+/** Shared RPDO transmit-completion state published by Lely OnTpdo(). */
 struct RpdoTransmitState {
-    std::mutex mutex;
-    std::condition_variable condition;
-    bool completed = false;
-    int pdo_number = 0;
-    std::error_code error;
-    std::array<std::uint8_t, kTpdoPayloadLength> payload{};
-    std::size_t length = 0;
+    std::mutex mutex; /**< Protects completion metadata and payload copy. */
+    std::condition_variable condition; /**< Wakes the RPDO send waiter. */
+    bool completed = false; /**< false until the corresponding send callback runs. */
+    int pdo_number = 0; /**< Zero sentinel until callback reports a PDO number. */
+    std::error_code error; /**< Default success; callback stores send error. */
+    std::array<std::uint8_t, kTpdoPayloadLength> payload{}; /**< Zero-filled callback payload copy. */
+    std::size_t length = 0; /**< Zero until callback reports transmitted DLC. */
 };
 
 /**
@@ -123,16 +138,21 @@ void registerPdoCallbacks(
                 return;
             }
 
+            /* sample starts zeroed so short/invalid payloads never expose
+             * uninitialized bytes in diagnostics. */
             TpdoSample sample;
             sample.length = length;
             sample.timestamp = Clock::now();
             if (payload != nullptr && length != 0U) {
+                /* Clamp copy length to local storage even when Lely reports an
+                 * invalid oversized DLC; validation below still marks failure. */
                 const std::size_t copy_length =
                     std::min(length, sample.payload.size());
                 std::memcpy(sample.payload.data(), payload, copy_length);
             }
 
             {
+                /* Publish sample/error state atomically to the process thread. */
                 std::lock_guard<std::mutex> lock(receive_state->mutex);
                 if (error || length != kTpdoPayloadLength
                     || (payload == nullptr && length != 0U)) {
@@ -162,6 +182,8 @@ void registerPdoCallbacks(
                 return;
             }
 
+            /* Serialize the entire transmit callback snapshot so the waiter
+             * sees metadata and payload from the same completion event. */
             std::lock_guard<std::mutex> lock(transmit_state->mutex);
             transmit_state->completed = true;
             transmit_state->pdo_number = num;
@@ -169,6 +191,7 @@ void registerPdoCallbacks(
             transmit_state->length = length;
             transmit_state->payload.fill(0);
             if (payload != nullptr && length != 0U) {
+                /* Clamp copied bytes to the fixed diagnostic buffer. */
                 const std::size_t copy_length =
                     std::min(length, transmit_state->payload.size());
                 std::memcpy(transmit_state->payload.data(), payload,
@@ -190,28 +213,6 @@ void clearPdoCallbacks(lely::canopen::AsyncMaster& master)
 }
 
 /**
- * @brief Issue an NMT command and convert exceptions into a process failure.
- *
- * @param master Active Lely asynchronous CANopen master.
- * @param command NMT command to issue.
- * @param node_id Target node-ID.
- * @param description Text used in failure diagnostics.
- * @return true on success; otherwise false.
- */
-bool issueNmtCommand(lely::canopen::AsyncMaster& master,
-                     lely::canopen::NmtCommand command,
-                     std::uint8_t node_id, const char* description)
-{
-    try {
-        master.Command(command, node_id);
-    } catch (const std::exception& exception) {
-        spdlog::error("{} failed: {}", description, exception.what());
-        return false;
-    }
-    return true;
-}
-
-/**
  * @brief Wait for the configured TPDO sample set.
  *
  * @param state Shared receive state populated by the event-loop thread.
@@ -219,6 +220,8 @@ bool issueNmtCommand(lely::canopen::AsyncMaster& master,
  */
 bool waitForTpdoSamples(const std::shared_ptr<TpdoReceiveState>& state)
 {
+    /* unique_lock lets the callback acquire the mutex while this thread is
+     * sleeping inside condition_variable::wait_for(). */
     std::unique_lock<std::mutex> lock(state->mutex);
     if (!state->condition.wait_for(
             lock, std::chrono::milliseconds(kTpdoCollectionTimeoutMs),
@@ -255,21 +258,32 @@ bool waitForTpdoSamples(const std::shared_ptr<TpdoReceiveState>& state)
  */
 bool validateTpdoSamples(const std::shared_ptr<TpdoReceiveState>& state)
 {
+    /* Copy the callback-owned sample window once so timing validation runs
+     * without holding the receive mutex or blocking later TPDO callbacks. */
     std::array<TpdoSample, kTpdoSampleCount> samples;
     {
+        /* Protect the snapshot copy from concurrent callback updates. */
         std::lock_guard<std::mutex> lock(state->mutex);
         samples = state->samples;
     }
 
+    /* Inclusive lower bound derived from the configured period tolerance. */
     const std::int64_t minimum_interval_ms =
         static_cast<std::int64_t>(kTpdoPeriodMs - kTpdoToleranceMs);
+    /* Inclusive upper bound derived from the configured period tolerance. */
     const std::int64_t maximum_interval_ms =
         static_cast<std::int64_t>(kTpdoPeriodMs + kTpdoToleranceMs);
 
+    /* i identifies each captured frame and, from i=1 onward, its preceding
+     * inter-frame timing interval. */
     for (std::size_t i = 0; i < samples.size(); ++i) {
+        /* TPDO1 bytes 0..3 map 0x2100:00 in little-endian CANopen order. */
         const std::uint32_t value1 = decodeLe32(samples[i].payload.data());
+        /* TPDO1 bytes 4..7 map 0x2101:00. */
         const std::uint32_t value2 =
             decodeLe32(samples[i].payload.data() + 4U);
+        /* Offset is relative to sample zero to make logs independent of the
+         * arbitrary steady_clock epoch. */
         const auto offset =
             std::chrono::duration_cast<std::chrono::milliseconds>(
                 samples[i].timestamp - samples[0].timestamp);
@@ -282,8 +296,12 @@ bool validateTpdoSamples(const std::shared_ptr<TpdoReceiveState>& state)
             continue;
         }
 
+        /* Compare only adjacent samples because the PDO requirement is a
+         * per-period bound, not cumulative drift from sample zero. */
         const auto interval = std::chrono::duration_cast<std::chrono::milliseconds>(
             samples[i].timestamp - samples[i - 1U].timestamp);
+        /* Convert to signed arithmetic so bounds remain valid if configuration
+         * changes toward smaller periods/tolerances in the future. */
         const std::int64_t interval_ms = interval.count();
         spdlog::info("A03 TPDO1 interval[{}]={} ms", i, interval_ms);
         if (interval_ms < minimum_interval_ms
@@ -300,150 +318,6 @@ bool validateTpdoSamples(const std::shared_ptr<TpdoReceiveState>& state)
 }
 
 /**
- * @brief Read an UNSIGNED32 object from the remote node through SDO.
- *
- * @param master Active Lely asynchronous CANopen master.
- * @param index Remote object index.
- * @param subindex Remote object sub-index.
- * @param value Receives the uploaded value on success.
- * @return Operation result including protocol and local completion timeouts.
- */
-SdoOperationResult readRemoteU32(lely::canopen::AsyncMaster& master,
-                                 std::uint16_t index, std::uint8_t subindex,
-                                 std::uint32_t& value)
-{
-    struct ReadState {
-        std::mutex mutex;
-        std::condition_variable condition;
-        bool completed = false;
-        std::error_code error;
-        std::uint32_t value = 0;
-    };
-
-    const auto state = std::make_shared<ReadState>();
-    std::error_code submit_error;
-    master.SubmitRead<std::uint32_t>(
-        master.GetExecutor(), CANOPEN_SLAVE_NODE_ID, index, subindex,
-        [state](std::uint8_t, std::uint16_t, std::uint8_t,
-                std::error_code error, std::uint32_t read_value) noexcept {
-            {
-                std::lock_guard<std::mutex> lock(state->mutex);
-                state->completed = true;
-                state->error = error;
-                state->value = read_value;
-            }
-            state->condition.notify_all();
-        },
-        std::chrono::milliseconds(kSdoTimeoutMs), submit_error);
-    if (submit_error) {
-        spdlog::error("A03 unable to submit SDO read 0x{:04x}:{:02x}: {}",
-                      index, static_cast<unsigned int>(subindex),
-                      submit_error.message());
-        return SdoOperationResult::FAILED;
-    }
-
-    std::unique_lock<std::mutex> lock(state->mutex);
-    if (!state->condition.wait_for(
-            lock,
-            std::chrono::milliseconds(kSdoTimeoutMs
-                                      + kSdoCompletionMarginMs),
-            [state]() { return state->completed; })) {
-        spdlog::error(
-            "A03 SDO read completion 0x{:04x}:{:02x} timed out; remote "
-            "transaction state is unknown",
-            index, static_cast<unsigned int>(subindex));
-        return SdoOperationResult::WAIT_TIMEOUT;
-    }
-    if (state->error) {
-        if (lely::canopen::sdo_errc(state->error)
-            == lely::canopen::SdoErrc::TIMEOUT) {
-            spdlog::error("A03 SDO read 0x{:04x}:{:02x} timed out: {}", index,
-                          static_cast<unsigned int>(subindex),
-                          state->error.message());
-            return SdoOperationResult::SDO_TIMEOUT;
-        }
-        spdlog::error("A03 SDO read 0x{:04x}:{:02x} failed: {}", index,
-                      static_cast<unsigned int>(subindex),
-                      state->error.message());
-        return SdoOperationResult::FAILED;
-    }
-
-    value = state->value;
-    return SdoOperationResult::SUCCESS;
-}
-
-/**
- * @brief Write an UNSIGNED32 object on the remote node through SDO.
- *
- * @param master Active Lely asynchronous CANopen master.
- * @param index Remote object index.
- * @param subindex Remote object sub-index.
- * @param value Value to download.
- * @return Operation result including protocol and local completion timeouts.
- */
-SdoOperationResult writeRemoteU32(lely::canopen::AsyncMaster& master,
-                                  std::uint16_t index,
-                                  std::uint8_t subindex,
-                                  std::uint32_t value)
-{
-    struct WriteState {
-        std::mutex mutex;
-        std::condition_variable condition;
-        bool completed = false;
-        std::error_code error;
-    };
-
-    const auto state = std::make_shared<WriteState>();
-    std::error_code submit_error;
-    master.SubmitWrite(
-        master.GetExecutor(), CANOPEN_SLAVE_NODE_ID, index, subindex, value,
-        [state](std::uint8_t, std::uint16_t, std::uint8_t,
-                std::error_code error) noexcept {
-            {
-                std::lock_guard<std::mutex> lock(state->mutex);
-                state->completed = true;
-                state->error = error;
-            }
-            state->condition.notify_all();
-        },
-        std::chrono::milliseconds(kSdoTimeoutMs), submit_error);
-    if (submit_error) {
-        spdlog::error("A03 unable to submit SDO write 0x{:04x}:{:02x}: {}",
-                      index, static_cast<unsigned int>(subindex),
-                      submit_error.message());
-        return SdoOperationResult::FAILED;
-    }
-
-    std::unique_lock<std::mutex> lock(state->mutex);
-    if (!state->condition.wait_for(
-            lock,
-            std::chrono::milliseconds(kSdoTimeoutMs
-                                      + kSdoCompletionMarginMs),
-            [state]() { return state->completed; })) {
-        spdlog::error(
-            "A03 SDO write completion 0x{:04x}:{:02x} timed out; remote "
-            "state is unknown",
-            index, static_cast<unsigned int>(subindex));
-        return SdoOperationResult::WAIT_TIMEOUT;
-    }
-    if (state->error) {
-        if (lely::canopen::sdo_errc(state->error)
-            == lely::canopen::SdoErrc::TIMEOUT) {
-            spdlog::error("A03 SDO write 0x{:04x}:{:02x} timed out: {}", index,
-                          static_cast<unsigned int>(subindex),
-                          state->error.message());
-            return SdoOperationResult::SDO_TIMEOUT;
-        }
-        spdlog::error("A03 SDO write 0x{:04x}:{:02x} failed: {}", index,
-                      static_cast<unsigned int>(subindex),
-                      state->error.message());
-        return SdoOperationResult::FAILED;
-    }
-
-    return SdoOperationResult::SUCCESS;
-}
-
-/**
  * @brief Read a TPDO-mapped remote UNSIGNED32 value from the local mapping.
  *
  * @param master Active Lely asynchronous CANopen master.
@@ -456,6 +330,8 @@ bool readMappedTpdoValue(lely::canopen::AsyncMaster& master,
                          std::uint16_t index, std::uint8_t subindex,
                          std::uint32_t& value)
 {
+    /* Local mapped-object reads are synchronous and do not issue remote SDO;
+     * default construction represents no local mapping error. */
     std::error_code error;
     value = master.RpdoMapped(CANOPEN_SLAVE_NODE_ID)[index][subindex]
                 .Read<std::uint32_t>(error);
@@ -479,6 +355,7 @@ bool readMappedTpdoValue(lely::canopen::AsyncMaster& master,
 bool getLatestTpdoSample(const std::shared_ptr<TpdoReceiveState>& state,
                          TpdoSample& sample, std::size_t& generation)
 {
+    /* Copy latest frame and generation as one coherent callback snapshot. */
     std::lock_guard<std::mutex> lock(state->mutex);
     if (state->failed || state->generation == 0U) {
         return false;
@@ -498,6 +375,8 @@ bool getLatestTpdoSample(const std::shared_ptr<TpdoReceiveState>& state,
 bool isTpdoGenerationStable(const std::shared_ptr<TpdoReceiveState>& state,
                             std::size_t generation)
 {
+    /* Compare against the caller's captured generation under the same mutex
+     * used by the receive callback. */
     std::lock_guard<std::mutex> lock(state->mutex);
     return !state->failed && state->generation == generation;
 }
@@ -516,20 +395,28 @@ bool verifyTpdoOdConsistency(
     const std::shared_ptr<TpdoReceiveState>& state,
     bool& completion_wait_timed_out)
 {
+    /* attempt bounds retries when a periodic TPDO lands between the raw-frame,
+     * mapped-value, and SDO snapshots. */
     for (unsigned int attempt = 0; attempt < kConsistencyRetryCount;
          ++attempt) {
+        /* Default sample is empty until getLatestTpdoSample() replaces it. */
         TpdoSample sample;
+        /* Zero means no TPDO generation has been captured yet. */
         std::size_t generation = 0;
         if (!getLatestTpdoSample(state, sample, generation)) {
             spdlog::error("A03 TPDO1 has no valid sample for OD comparison");
             return false;
         }
 
+        /* Decode the first mapped value directly from the captured CAN bytes. */
         const std::uint32_t raw_value1 = decodeLe32(sample.payload.data());
+        /* Decode the second mapped value from bytes 4..7. */
         const std::uint32_t raw_value2 =
             decodeLe32(sample.payload.data() + 4U);
 
+        /* Zero is only a placeholder until the 0x2100 local mapping read succeeds. */
         std::uint32_t mapped_value1 = 0;
+        /* Zero is only a placeholder until the 0x2101 local mapping read succeeds. */
         std::uint32_t mapped_value2 = 0;
         if (!readMappedTpdoValue(master, kTpdoValue1Index,
                                  kTpdoValue1Subindex, mapped_value1)
@@ -541,10 +428,12 @@ bool verifyTpdoOdConsistency(
             continue;
         }
 
+        /* Remote SDO values provide an independent OD view of TPDO content. */
         std::uint32_t sdo_value1 = 0;
-        const SdoOperationResult read1 =
-            readRemoteU32(master, kTpdoValue1Index, kTpdoValue1Subindex,
-                          sdo_value1);
+        /* Preserve the first upload result so WAIT_TIMEOUT can stop later SDO. */
+        const SdoOperationResult read1 = readRemoteSdo<std::uint32_t>(
+            master, CANOPEN_SLAVE_NODE_ID, kTpdoValue1Index,
+            kTpdoValue1Subindex, sdo_value1);
         if (read1 == SdoOperationResult::WAIT_TIMEOUT) {
             completion_wait_timed_out = true;
             return false;
@@ -553,10 +442,12 @@ bool verifyTpdoOdConsistency(
             return false;
         }
 
+        /* Zero placeholder for the second remote OD value. */
         std::uint32_t sdo_value2 = 0;
-        const SdoOperationResult read2 =
-            readRemoteU32(master, kTpdoValue2Index, kTpdoValue2Subindex,
-                          sdo_value2);
+        /* Keep the second upload result separate for precise failure handling. */
+        const SdoOperationResult read2 = readRemoteSdo<std::uint32_t>(
+            master, CANOPEN_SLAVE_NODE_ID, kTpdoValue2Index,
+            kTpdoValue2Subindex, sdo_value2);
         if (read2 == SdoOperationResult::WAIT_TIMEOUT) {
             completion_wait_timed_out = true;
             return false;
@@ -614,6 +505,8 @@ bool sendRpdoValue(lely::canopen::AsyncMaster& master,
                    std::uint32_t value)
 {
     {
+        /* Clear the previous send result before triggering a new PDO event so
+         * stale callback data cannot satisfy this transmission wait. */
         std::lock_guard<std::mutex> lock(state->mutex);
         state->completed = false;
         state->pdo_number = 0;
@@ -622,7 +515,11 @@ bool sendRpdoValue(lely::canopen::AsyncMaster& master,
         state->length = 0;
     }
 
+    /* Local mapping operations report synchronously through error, which
+     * starts in the no-error state. */
     std::error_code error;
+    /* This mapped proxy targets the master's local TPDO representation for the
+     * slave RPDO object 0x2200:00; WriteEvent() transmits it on CAN. */
     auto mapped = master.TpdoMapped(CANOPEN_SLAVE_NODE_ID)[kRpdoTestIndex]
                                     [kRpdoTestSubindex];
     mapped.Write(value, error);
@@ -638,6 +535,8 @@ bool sendRpdoValue(lely::canopen::AsyncMaster& master,
         return false;
     }
 
+    /* Wait for Lely's TPDO send callback while the event-loop thread remains
+     * free to perform the actual CAN transmission. */
     std::unique_lock<std::mutex> lock(state->mutex);
     if (!state->condition.wait_for(
             lock, std::chrono::milliseconds(kRpdoTransmitTimeoutMs),
@@ -659,6 +558,8 @@ bool sendRpdoValue(lely::canopen::AsyncMaster& master,
         return false;
     }
 
+    /* Decode the callback payload to prove the transmitted RPDO value matches
+     * the requested probe rather than merely receiving a success callback. */
     const std::uint32_t payload_value = decodeLe32(state->payload.data());
     if (payload_value != value) {
         spdlog::error(
@@ -684,9 +585,11 @@ bool restoreRpdoTestValue(lely::canopen::AsyncMaster& master,
                           std::uint32_t original_value,
                           bool& completion_wait_timed_out)
 {
-    const SdoOperationResult write_result =
-        writeRemoteU32(master, kRpdoTestIndex, kRpdoTestSubindex,
-                       original_value);
+    /* Restore through SDO because read-back verification needs a known remote
+     * OD state independent of the PDO transmission path under test. */
+    const SdoOperationResult write_result = writeRemoteSdo<std::uint32_t>(
+        master, CANOPEN_SLAVE_NODE_ID, kRpdoTestIndex,
+        kRpdoTestSubindex, original_value);
     if (write_result == SdoOperationResult::WAIT_TIMEOUT) {
         completion_wait_timed_out = true;
         return false;
@@ -700,10 +603,12 @@ bool restoreRpdoTestValue(lely::canopen::AsyncMaster& master,
             "read-back");
     }
 
+    /* Zero is a neutral placeholder until the verification upload completes. */
     std::uint32_t restored_value = 0;
-    const SdoOperationResult read_result =
-        readRemoteU32(master, kRpdoTestIndex, kRpdoTestSubindex,
-                      restored_value);
+    /* Preserve read result classification for WAIT_TIMEOUT safety handling. */
+    const SdoOperationResult read_result = readRemoteSdo<std::uint32_t>(
+        master, CANOPEN_SLAVE_NODE_ID, kRpdoTestIndex,
+        kRpdoTestSubindex, restored_value);
     if (read_result == SdoOperationResult::WAIT_TIMEOUT) {
         completion_wait_timed_out = true;
         return false;
@@ -728,32 +633,44 @@ bool restoreRpdoTestValue(lely::canopen::AsyncMaster& master,
 
 int pdoProcess(lely::canopen::AsyncMaster& master)
 {
+    /* Shared receive state starts empty because A03 must collect a fresh TPDO
+     * sample set after the callbacks are installed. */
     const auto receive_state = std::make_shared<TpdoReceiveState>();
+    /* Shared transmit state starts incomplete because no RPDO probe has been
+     * requested yet. */
     const auto transmit_state = std::make_shared<RpdoTransmitState>();
     registerPdoCallbacks(master, receive_state, transmit_state);
 
+    /* result remains zero until any protocol assertion or cleanup step fails. */
     int result = 0;
+    /* false prevents restoration until the original 0x2200:00 value is known. */
     bool original_value_saved = false;
+    /* false means the current SDO channel completion state is known; once set,
+     * no additional SDO cleanup is submitted because the prior callback may
+     * still complete later. */
     bool completion_wait_timed_out = false;
+    /* Neutral storage overwritten by the initial 0x2200:00 SDO upload. */
     std::uint32_t original_value = 0;
 
+    /* Step 1: keep the local master Operational so its PDO services remain
+     * active while A03 collects and transmits PDO traffic. */
     if (!issueNmtCommand(master, lely::canopen::NmtCommand::START,
                          CANOPEN_MASTER_NODE_ID,
                          "A03 local master NMT Start")) {
         result = 1;
     }
 
+    /* Step 2: put the slave in Operational, which enables its configured PDO
+     * production and consumption. */
     if (result == 0
         && !issueNmtCommand(master, lely::canopen::NmtCommand::START,
                             CANOPEN_SLAVE_NODE_ID,
                             "A03 slave NMT Start")) {
         result = 1;
     }
-    /*
-    * TPDO1 is event-driven (transmission type 254) with a 1000 ms event
-    * timer. After the slave enters Operational, CANopenNode transmits TPDO1
-    * periodically without a request from the master.
-    */
+    /* Step 3: TPDO1 is event-driven (transmission type 254) with a 1000 ms
+     * event timer. Collect five frames, validate timing, then compare raw CAN
+     * bytes with both Lely's mapped view and independent remote SDO reads. */
     if (result == 0 && !waitForTpdoSamples(receive_state)) {
         result = 1;
     }
@@ -766,10 +683,13 @@ int pdoProcess(lely::canopen::AsyncMaster& master)
         result = 1;
     }
 
+    /* Step 4: save the RPDO-mapped user object before transmitting a probe so
+     * the test can restore the exact pre-test value. */
     if (result == 0) {
-        const SdoOperationResult read_result =
-            readRemoteU32(master, kRpdoTestIndex, kRpdoTestSubindex,
-                          original_value);
+        /* Preserve the detailed SDO result to detect an unknown callback state. */
+        const SdoOperationResult read_result = readRemoteSdo<std::uint32_t>(
+            master, CANOPEN_SLAVE_NODE_ID, kRpdoTestIndex,
+            kRpdoTestSubindex, original_value);
         if (read_result == SdoOperationResult::WAIT_TIMEOUT) {
             completion_wait_timed_out = true;
             result = 1;
@@ -782,6 +702,8 @@ int pdoProcess(lely::canopen::AsyncMaster& master)
         }
     }
 
+    /* Step 5: choose a probe guaranteed to differ from the saved value; this
+     * avoids a false PASS where the OD already contained the nominal pattern. */
     const std::uint32_t probe_value =
         original_value == kRpdoProbeValue ? kRpdoAlternateValue
                                            : kRpdoProbeValue;
@@ -791,11 +713,15 @@ int pdoProcess(lely::canopen::AsyncMaster& master)
         }
     }
 
+    /* Step 6: independently confirm the RPDO write reached the remote OD via
+     * SDO read-back, not only via the local transmit callback. */
     if (result == 0) {
+        /* Zero is only a placeholder until the SDO upload succeeds. */
         std::uint32_t read_back_value = 0;
-        const SdoOperationResult read_result =
-            readRemoteU32(master, kRpdoTestIndex, kRpdoTestSubindex,
-                          read_back_value);
+        /* Exact completion class controls whether later cleanup is safe. */
+        const SdoOperationResult read_result = readRemoteSdo<std::uint32_t>(
+            master, CANOPEN_SLAVE_NODE_ID, kRpdoTestIndex,
+            kRpdoTestSubindex, read_back_value);
         if (read_result == SdoOperationResult::WAIT_TIMEOUT) {
             completion_wait_timed_out = true;
             result = 1;
@@ -812,6 +738,9 @@ int pdoProcess(lely::canopen::AsyncMaster& master)
         }
     }
 
+    /* Step 7: restore 0x2200:00 whenever its original value was captured. A
+     * local completion wait timeout forces best-effort PDO restoration because
+     * another SDO transaction could overlap an unknown in-flight request. */
     if (original_value_saved) {
         if (!completion_wait_timed_out
             && !restoreRpdoTestValue(master, original_value,
@@ -831,6 +760,8 @@ int pdoProcess(lely::canopen::AsyncMaster& master)
         }
     }
 
+    /* Step 8: always unregister A03 callbacks so later stages do not consume
+     * stale TPDO/RPDO events through A03 state objects. */
     clearPdoCallbacks(master);
 
     if (result == 0) {

@@ -112,7 +112,9 @@ NrOfEntries=1
 
 ## 编译期配置
 
-跨流程共享的运行参数位于 `include/canopen_config.h`：
+`include/canopen_config.h` 只保存被多个模块或主运行时共同使用的全局配置。协议专属配置和单个流程的开关必须放在对应模块头文件，避免公共配置头持续膨胀。
+
+全局配置：
 
 | 宏 | 默认值 | 说明 |
 | --- | ---: | --- |
@@ -122,13 +124,21 @@ NrOfEntries=1
 | `CANOPEN_SLAVE_NODE_ID` | `1` | 被测从机 Node-ID |
 | `CANOPEN_MASTER_DCF_PATH` | `../config/master.dcf` | 相对远端 `bin/` 的 DCF 路径 |
 | `CANOPEN_CHANNEL_RX_QUEUE_SIZE` | `256` | SocketCAN receive queue |
-| `CANOPEN_WAIT_TIMEOUT_MS` | `5000` | Startup Boot 和 Final Reset 等公共等待时间 |
-| `CANOPEN_ENABLE_HEARTBEAT_PROCESS` | `1` | 注册并执行 A01 Heartbeat |
-| `CANOPEN_ENABLE_SDO_PROCESS` | `1` | 注册并执行 A02 SDO |
-| `CANOPEN_ENABLE_PDO_PROCESS` | `1` | 注册并执行 A03 RPDO/TPDO |
-| `CANOPEN_ENABLE_FINAL_RESET_PROCESS` | `1` | 退出时执行 Reset Communication |
+| `CANOPEN_WAIT_TIMEOUT_MS` | `5000` | Startup Boot、A04 异常恢复和 Final Reset 等跨流程等待时间 |
 | `CANOPEN_LOG_QUEUE_SIZE` | `8192` | 异步日志队列容量 |
 | `CANOPEN_LOG_WORKER_COUNT` | `1` | 异步日志 worker 数量 |
+
+模块专属配置：
+
+| 头文件 | 宏 | 默认值 | 说明 |
+| --- | --- | ---: | --- |
+| `include/canopen_sdo.h` | `CANOPEN_SDO_TIMEOUT_MS` | `5000` | 公共远端 SDO helper 传给 Lely 的协议级 timeout |
+| `include/canopen_sdo.h` | `CANOPEN_SDO_COMPLETION_MARGIN_MS` | `500` | SDO 协议 timeout 后额外等待 completion callback 的本地余量 |
+| `include/nmt_heartbeat.h` | `CANOPEN_ENABLE_HEARTBEAT_PROCESS` | `1` | 注册并执行 A01 Heartbeat |
+| `include/sdo_process.h` | `CANOPEN_ENABLE_SDO_PROCESS` | `1` | 注册并执行 A02 SDO |
+| `include/pdo_process.h` | `CANOPEN_ENABLE_PDO_PROCESS` | `1` | 注册并执行 A03 RPDO/TPDO |
+| `include/sync_pdo_process.h` | `CANOPEN_ENABLE_SYNC_PDO_PROCESS` | `1` | 注册并执行 A04 SYNC/同步 TPDO |
+| `include/shutdown_process.h` | `CANOPEN_ENABLE_FINAL_RESET_PROCESS` | `1` | 退出时执行 Reset Communication |
 
 测试流程自己的对象索引、probe value、采样数量、周期容差和流程 timeout 不放入公共配置头。当前分别位于：
 
@@ -136,9 +146,10 @@ NrOfEntries=1
 A01  src/nmt_heartbeat.cpp
 A02  src/sdo_process.cpp
 A03  src/pdo_process.cpp
+A04  src/sync_pdo_process.cpp
 ```
 
-A01 当前使用 `kHeartbeatIndex=0x1017`、`kHeartbeatTimeoutMs=3000`、`kHeartbeatSampleCount=5` 和 500 ms Producer Heartbeat 周期。A02 使用 `kTestObjectIndex=0x2200`、`kProbeValue=0x12345678`，并在 probe 与原值相同时选择备用值。A03 的 PDO number、`0x2100/0x2101/0x2200`、采样策略和时序容差全部保存在 `pdo_process.cpp`。
+A01 当前使用 `kHeartbeatIndex=0x1017`、`kHeartbeatTimeoutMs=3000`、`kHeartbeatSampleCount=5` 和 500 ms Producer Heartbeat 周期。A02 使用 `kTestObjectIndex=0x2200`、`kProbeValue=0x12345678`，并在 probe 与原值相同时选择备用值。A03 的 PDO number、`0x2100/0x2101/0x2200`、采样策略和时序容差全部保存在 `pdo_process.cpp`；A04 的 SYNC 周期、样本数量、TPDO1 参数索引和时序窗口保存在 `sync_pdo_process.cpp`。
 
 从机的基线 Heartbeat 和 PDO 参数仍由 YAML、EDS、`dcfgen` 和 Lely Boot 管理。修改真实通信参数时必须同步修改配置源并重新生成 DCF；源码中的流程私有常量只定义测试行为。
 
@@ -150,11 +161,12 @@ A01 当前使用 `kHeartbeatIndex=0x1017`、`kHeartbeatTimeoutMs=3000`、`kHeart
 A01 Heartbeat
 A02 SDO
 A03 PDO
+A04 SYNC PDO
 ```
 
-对应 `CANOPEN_ENABLE_*_PROCESS` 宏为 `1` 时进入注册表，为 `0` 时不注册。流程采用 fail-fast：任一流程返回非零后，后续流程不再执行。
+各 `CANOPEN_ENABLE_*_PROCESS` 宏位于对应流程头文件；值为 `1` 时进入注册表，为 `0` 时不注册。流程采用 fail-fast：任一流程返回非零后，后续流程不再执行。
 
-`CANOPEN_ENABLE_FINAL_RESET_PROCESS` 只控制退出阶段的 Reset Communication，不属于自动验证流程表。
+`CANOPEN_ENABLE_FINAL_RESET_PROCESS` 位于 `include/shutdown_process.h`，只控制退出阶段的 Reset Communication，不属于自动验证流程表。
 
 ## 部署
 

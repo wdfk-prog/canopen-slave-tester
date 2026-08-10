@@ -1,6 +1,6 @@
 # CANopen Master 自动协议测试
 
-本工程基于 Lely CANopen，面向 TQ8MP Linux/aarch64 主站与 RT-Thread + CANopenNode MCU 从机。当前自动流程按顺序执行 A01 Heartbeat、A02 SDO 和 A03 RPDO/TPDO；任一流程失败后停止执行后续自动流程。测试结束后程序继续运行，直到收到 `Ctrl+C`/`SIGTERM`，再执行 Final Reset Communication 并退出。
+本工程基于 Lely CANopen，面向 TQ8MP Linux/aarch64 主站与 RT-Thread + CANopenNode MCU 从机。当前自动流程按顺序执行 A01 Heartbeat、A02 SDO、A03 RPDO/TPDO 和 A04 SYNC/同步 TPDO；任一流程失败后停止执行后续自动流程。测试结束后程序继续运行，直到收到 `Ctrl+C`/`SIGTERM`，再执行 Final Reset Communication 并退出。
 
 ## 自动测试链路
 
@@ -30,11 +30,19 @@ Startup Boot
    → SDO 回读 0x2200:00
    → 恢复并验证 0x2200:00 原值
    → 本地主站保持 Operational，供后续自动流程继续使用
+→ A04 SYNC PDO
+   → 校验主站 0x1005 为 SYNC producer、从机 0x1005 为 SYNC consumer
+   → 保存 TPDO1 communication parameters
+   → 从机进入 Pre-operational，按 disable/type=1/enable 顺序临时切换 TPDO1
+   → 无 SYNC 窗口确认 TPDO1 静默
+   → Lely 主站周期发送 5 个 SYNC，验证每个 SYNC 对应 1 个 TPDO1
+   → 停止 SYNC，恢复并回读 TPDO1 原参数
+   → 无 SYNC 下验证恢复后的事件型 TPDO1 周期
 → 等待 Ctrl+C
 → Final Reset Communication
 ```
 
-A03 不使用外部 `cansend`，PDO 收发由 Lely `OnRpdo()`、`OnTpdo()`、`RpdoMapped()` 和 `TpdoMapped()` 完成。当前 EDS/DCF 已包含 A03 所需的默认 PDO 映射，不需要为该测试重新生成配置。
+A03 不使用外部 `cansend`，PDO 收发由 Lely `OnRpdo()`、`OnTpdo()`、`RpdoMapped()` 和 `TpdoMapped()` 完成。A04 同样不构造原始 CAN 帧，SYNC 由 Lely 本地 `0x1006` producer 定时器产生，并通过 `OnSync()` 与 `OnRpdo()` 建立同步时序证据。当前 EDS/DCF 已包含 A03/A04 所需的默认 PDO 和 SYNC 配置，不需要为该测试重新生成配置。
 
 ## 流程私有配置
 
@@ -42,7 +50,8 @@ A03 不使用外部 `cansend`，PDO 收发由 Lely `OnRpdo()`、`OnTpdo()`、`Rp
 
 - A01：`src/nmt_heartbeat.cpp`；
 - A02：`src/sdo_process.cpp`；
-- A03：`src/pdo_process.cpp`。
+- A03：`src/pdo_process.cpp`；
+- A04：`src/sync_pdo_process.cpp`。
 
 从机基线 Heartbeat 和 PDO 通信参数仍以 `config/master.yml`、EDS 和生成后的 DCF 为准。
 
@@ -55,9 +64,11 @@ config/generated/mcu_node_1.bin   节点 1 concise DCF
 include/nmt_heartbeat.h            A01/Boot 接口
 include/sdo_process.h              A02 接口
 include/pdo_process.h              A03 接口
+include/sync_pdo_process.h         A04 接口
 src/nmt_heartbeat.cpp              Boot、Heartbeat、EMCY 和 A01
 src/sdo_process.cpp                A02 用户 OD SDO 验证
 src/pdo_process.cpp                A03 RPDO/TPDO 验证
+src/sync_pdo_process.cpp           A04 SYNC consumer/同步 TPDO 验证
 src/main.cpp                       Lely 生命周期和自动流程注册
 src/shutdown_process.cpp           Final Reset Communication
 ```
@@ -76,7 +87,7 @@ cd config
     master.yml
 ```
 
-A03 当前直接使用既有 `project.eds`/`master.dcf` 映射；只有通信参数或映射本身发生变化时才需要重新生成 DCF。
+A03/A04 当前直接使用既有 `project.eds`/`master.dcf` 映射和 SYNC 对象。A04 只在运行期临时修改节点 1 的 `0x1800` 并恢复，不修改配置源；只有基线通信参数或映射本身发生变化时才需要重新生成 DCF。
 
 详细检查项见 [`docs/configuration.md`](docs/configuration.md) 和 [`docs/acceptance.md`](docs/acceptance.md)。
 
@@ -134,8 +145,10 @@ candump -t A -x can1
 
 - `0x77F`：主站 Heartbeat；
 - `0x701`：从机 Heartbeat；
-- `0x601/0x581`：A01/A02/A03 使用的远端 SDO；
+- `0x601/0x581`：A01/A02/A03/A04 使用的远端 SDO；
 - `0x181`：从机 TPDO1，默认约 1000 ms 周期、DLC 8；
-- `0x201`：A03 发送给从机的 RPDO1，DLC 4。
+- `0x201`：A03 发送给从机的 RPDO1，DLC 4；
+- `0x080`：A04 由 Lely 主站产生的 SYNC，当前测试为无 counter byte；
+- A04 同步窗口内应表现为每个 `0x080` 后对应一个 `0x181`。
 
 目标板验收必须同时检查程序日志、CAN 抓包和 `0x2200:00` 恢复结果；Host 语法检查不能替代目标板验证。

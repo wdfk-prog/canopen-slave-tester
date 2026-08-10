@@ -1,20 +1,21 @@
-# A01-A03 自动测试验收
+# A01-A04 自动测试验收
 
 ## 本地静态验收
 
 确认流程注册和 Lely PDO API：
 
 ```sh
-grep -R "heartbeatProcess\|sdoProcess\|pdoProcess" src include
+grep -R "heartbeatProcess\|sdoProcess\|pdoProcess\|syncPdoProcess" src include
 grep -R "OnRpdo\|OnTpdo\|RpdoMapped\|TpdoMapped\|WriteEvent" \
     src/pdo_process.cpp include/pdo_process.h
 ```
 
-确认 A03 没有绕过 Lely 构造 SocketCAN PDO 帧：
+确认 A03/A04 没有绕过 Lely 构造 SocketCAN PDO/SYNC 帧：
 
 ```sh
 grep -R "cansend\|struct can_frame\|PF_CAN\|SOCK_RAW" \
-    src/pdo_process.cpp include/pdo_process.h
+    src/pdo_process.cpp include/pdo_process.h \
+    src/sync_pdo_process.cpp include/sync_pdo_process.h
 ```
 
 预期无结果。
@@ -149,6 +150,53 @@ A03 开始时本地主站 Node-ID 127 切到 Operational，并向节点 1发送 
 - 从机 `0x2200:00` 恢复并验证原值，或明确报告恢复未验证；
 - 不修改 EDS、DCF 或持久化参数。
 
+## A04 SYNC 与同步 TPDO1
+
+当前基线要求：
+
+```text
+master 0x1005 = 0x40000080  SYNC producer
+master 0x1006 = 0           idle before test
+slave  0x1005 = 0x00000080  SYNC consumer
+master/slave 0x1019 = 0      no SYNC counter byte
+slave TPDO1 0x1800:02 = 254  event-driven baseline
+slave TPDO1 0x1800:05 = 1000 ms
+```
+
+通过条件：
+
+1. 运行时读取确认主站 producer bit 为 1、从机 producer bit 为 0；
+2. 主从 SYNC COB-ID/帧格式一致，`0x1019` 均为 0；
+3. 保存 `0x1800:00/01/02/03/05/06` 成功；
+4. Enter Pre-operational 命令后必须观察到新的远端 `OnState(PREOP)` 事件，再按 disable -> transmission type 1 -> enable 顺序配置成功并回读；若该状态确认超时，本次 A04 判 FAIL，且在尚未修改 TPDO1 的情况下仍必须执行最终 Start 清理；
+5. 主站 `0x1006=0` 的 quiet window 内没有 SYNC，也没有 TPDO1；
+6. Lely 主站发送 5 个 200 ms 周期 SYNC，`OnSync()` 正好观察 5 次；
+7. `OnRpdo(PDO1)` 正好观察 5 个 DLC 8、无 processing error 的 TPDO1；
+8. 每个 TPDO1 均发生在对应 SYNC 之后且下一 SYNC 之前；
+9. 第 5 个 SYNC 后停止 producer，再等待 200 ms，SYNC/TPDO 数仍保持 5/5；
+10. `0x1800:00/01/02/03/05/06` 全部恢复并回读与原值一致；
+11. 从机 `0x1005` 在测试前后保持一致；
+12. 无 SYNC 条件下恢复后的两个事件型 TPDO1 间隔为原 event timer `+/-150 ms`；
+13. 本地主站 `0x1006` 恢复为 A04 进入前原值；
+14. 任一 local SDO completion wait timeout 必须判 FAIL；从第一笔 TPDO1 修改型 SDO 开始即视为“远端可能已变更”。只要正常恢复未被全快照回读证明成功（包括 WAIT_TIMEOUT、SDO abort/timeout、NMT Pre-operational 失败或回读不一致），必须执行有界 Reset Communication + Boot；考虑到 Lely Boot 管理可能自动启动 mandatory slave，Boot 后还必须再次发送 Enter Pre-operational 并等待新的 `OnState(PREOP)` 状态事件，再做全快照回读；仅 NMT 命令提交成功不足以证明远端状态已切换。只有恢复已验证时才允许最终 NMT Start。
+
+预期抓包同步阶段近似：
+
+```text
+080#
+181#................
+080#
+181#................
+080#
+181#................
+080#
+181#................
+080#
+181#................
+```
+
+quiet window 不得出现 `0x080/0x181`；恢复事件型 TPDO 后，在没有 `0x080` 的情况下重新约每 1000 ms 出现 `0x181`。
+
 ## Final Reset
 
 按 `Ctrl+C` 后预期：
@@ -177,5 +225,9 @@ Final Reset Communication completed
 | 10 | A03 RPDO transmit | `0x201` DLC 4，payload 等于 probe |
 | 11 | A03 RPDO apply | SDO `0x2200` 回读等于 probe |
 | 12 | A03 cleanup | `0x2200` 原值恢复并验证，本地主站保持 Operational，且不触发广播 Reset Communication |
-| 13 | 正常退出 | Final Reset Communication 完成 |
-| 14 | 完整验证 | 交叉构建、目标抓包和本地多轮复审均有实际证据 |
+| 13 | A04 SYNC topology | 主站 producer、从机 consumer，COB-ID/0x1019 一致 |
+| 14 | A04 quiet window | 无 SYNC 时无同步 TPDO1 |
+| 15 | A04 sync/TPDO timing | 5 SYNC 对应 5 TPDO1，均位于对应同步周期 |
+| 16 | A04 cleanup | 0x1800 全快照恢复并回读，事件型 TPDO 周期恢复 |
+| 17 | 正常退出 | Final Reset Communication 完成 |
+| 18 | 完整验证 | 交叉构建、目标抓包和本地多轮复审均有实际证据 |

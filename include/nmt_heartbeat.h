@@ -6,6 +6,9 @@
 #ifndef NMT_HEARTBEAT_H
 #define NMT_HEARTBEAT_H
 
+/** Enable the A01 bidirectional Heartbeat verification process. */
+#define CANOPEN_ENABLE_HEARTBEAT_PROCESS 1
+
 #include <chrono>
 
 namespace lely {
