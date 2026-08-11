@@ -84,6 +84,19 @@ A03 使用 Lely 原生 PDO 能力：
 
 A03 的 PDO number、OD index/subindex、probe value、采样数、周期容差和超时均位于 `src/pdo_process.cpp` 的匿名命名空间中。
 
+## A05 TIME Consumer（主机侧已实现，默认关闭）
+
+声明位置：`include/time_process.h`。
+
+```cpp
+int timeProcess(
+    lely::canopen::AsyncMaster& master);
+```
+
+A05 使用公共远端 SDO helper 保存、修改和恢复从机 `0x1012:00`，并通过 Lely 内部 CAN network 发送可控 TIME 帧。MCU 必须提供只读诊断记录 `0x2300:01..03`，分别表示合法 DLC=6 TIME 接收计数、应用层 `CO_TIME_t::ms` 和 `CO_TIME_t::days`。主机通过接收计数确认帧到达，通过 `ms/days` 独立确认 TIME 是否真正被应用。当前 `CANOPEN_ENABLE_TIME_PROCESS=0`，在 MCU 诊断对象落地前不注册 A05。
+
+禁用 consumer 时，CANopenNode 动态 `0x1012` 写入只改变 `isConsumer`，不会注销已经建立的 RX buffer；因此 A05 允许合法 TIME 接收计数继续增加，但要求 `ms/days` 只按已有时间自然推进，不能跳到测试时间戳。若测试从初始 consumer-disabled 状态启用 bit31，A05 会执行一次 Reset Communication，使 CANopenNode 按新 `0x1012` 重新建立 TIME RX buffer。
+
 ## Final Reset
 
 声明位置：`include/shutdown_process.h`。

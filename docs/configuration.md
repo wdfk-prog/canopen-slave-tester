@@ -138,6 +138,7 @@ NrOfEntries=1
 | `include/sdo_process.h` | `CANOPEN_ENABLE_SDO_PROCESS` | `1` | 注册并执行 A02 SDO |
 | `include/pdo_process.h` | `CANOPEN_ENABLE_PDO_PROCESS` | `1` | 注册并执行 A03 RPDO/TPDO |
 | `include/sync_pdo_process.h` | `CANOPEN_ENABLE_SYNC_PDO_PROCESS` | `1` | 注册并执行 A04 SYNC/同步 TPDO |
+| `include/time_process.h` | `CANOPEN_ENABLE_TIME_PROCESS` | `0` | A05 主机侧已实现；MCU `0x2300:01..03` 就绪后再注册 TIME Consumer 测试 |
 | `include/shutdown_process.h` | `CANOPEN_ENABLE_FINAL_RESET_PROCESS` | `1` | 退出时执行 Reset Communication |
 
 测试流程自己的对象索引、probe value、采样数量、周期容差和流程 timeout 不放入公共配置头。当前分别位于：
@@ -147,9 +148,10 @@ A01  src/nmt_heartbeat.cpp
 A02  src/sdo_process.cpp
 A03  src/pdo_process.cpp
 A04  src/sync_pdo_process.cpp
+A05  src/time_process.cpp
 ```
 
-A01 当前使用 `kHeartbeatIndex=0x1017`、`kHeartbeatTimeoutMs=3000`、`kHeartbeatSampleCount=5` 和 500 ms Producer Heartbeat 周期。A02 使用 `kTestObjectIndex=0x2200`、`kProbeValue=0x12345678`，并在 probe 与原值相同时选择备用值。A03 的 PDO number、`0x2100/0x2101/0x2200`、采样策略和时序容差全部保存在 `pdo_process.cpp`；A04 的 SYNC 周期、样本数量、TPDO1 参数索引和时序窗口保存在 `sync_pdo_process.cpp`。
+A01 当前使用 `kHeartbeatIndex=0x1017`、`kHeartbeatTimeoutMs=3000`、`kHeartbeatSampleCount=5` 和 500 ms Producer Heartbeat 周期。A02 使用 `kTestObjectIndex=0x2200`、`kProbeValue=0x12345678`，并在 probe 与原值相同时选择备用值。A03 的 PDO number、`0x2100/0x2101/0x2200`、采样策略和时序容差全部保存在 `pdo_process.cpp`；A04 的 SYNC 周期、样本数量、TPDO1 参数索引和时序窗口保存在 `sync_pdo_process.cpp`；A05 的 `0x1012/0x2300`、TIME 边界值、诊断轮询和时序容差保存在 `time_process.cpp`。
 
 从机的基线 Heartbeat 和 PDO 参数仍由 YAML、EDS、`dcfgen` 和 Lely Boot 管理。修改真实通信参数时必须同步修改配置源并重新生成 DCF；源码中的流程私有常量只定义测试行为。
 
@@ -162,6 +164,7 @@ A01 Heartbeat
 A02 SDO
 A03 PDO
 A04 SYNC PDO
+A05 TIME  (当前宏默认 0，不注册)
 ```
 
 各 `CANOPEN_ENABLE_*_PROCESS` 宏位于对应流程头文件；值为 `1` 时进入注册表，为 `0` 时不注册。流程采用 fail-fast：任一流程返回非零后，后续流程不再执行。

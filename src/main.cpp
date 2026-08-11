@@ -10,6 +10,7 @@
 #include "pdo_process.h"
 #include "sdo_process.h"
 #include "sync_pdo_process.h"
+#include "time_process.h"
 #include "shutdown_process.h"
 
 #include <lely/coapp/master.hpp>
@@ -42,7 +43,8 @@ const std::array<CanopenProcessEntry,
                  CANOPEN_ENABLE_HEARTBEAT_PROCESS
                      + CANOPEN_ENABLE_SDO_PROCESS
                      + CANOPEN_ENABLE_PDO_PROCESS
-                     + CANOPEN_ENABLE_SYNC_PDO_PROCESS>
+                     + CANOPEN_ENABLE_SYNC_PDO_PROCESS
+                     + CANOPEN_ENABLE_TIME_PROCESS>
     g_canopen_processes = {{
 #if CANOPEN_ENABLE_HEARTBEAT_PROCESS
         {"A01 Heartbeat", heartbeatProcess},
@@ -56,6 +58,9 @@ const std::array<CanopenProcessEntry,
 #if CANOPEN_ENABLE_SYNC_PDO_PROCESS
         {"A04 SYNC PDO", syncPdoProcess},
 #endif /* CANOPEN_ENABLE_SYNC_PDO_PROCESS */
+#if CANOPEN_ENABLE_TIME_PROCESS
+        {"A05 TIME", timeProcess},
+#endif /* CANOPEN_ENABLE_TIME_PROCESS */
     }};
 
 /** Signal-safe shutdown request flag; zero means no termination signal yet. */
@@ -198,7 +203,7 @@ int main(void)
      * master.Reset(); this gates every automatic process. */
     bool startup_boot_succeeded = false;
     /* The master owns local OD state, SDO/PDO services, NMT control, and all
-     * callbacks used by A01-A04. */
+     * callbacks used by the enabled A01-A05 processes. */
     lely::canopen::AsyncMaster master(
         executor, timer, channel, CANOPEN_MASTER_DCF_PATH, "",
         CANOPEN_MASTER_NODE_ID);
@@ -226,8 +231,8 @@ int main(void)
                      CANOPEN_SLAVE_NODE_ID);
     }
 
-    /* Execute A01-A04 only after the startup Boot proves the remote node is
-     * reachable and managed by the current master instance. */
+    /* Execute enabled automatic processes only after startup Boot proves the
+     * remote node is reachable and managed by the current master instance. */
     if (startup_boot_succeeded) {
         error_count += canopenRunProcesses(master, g_canopen_processes.data(),
                                            g_canopen_processes.size());

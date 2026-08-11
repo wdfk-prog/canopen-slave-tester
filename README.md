@@ -44,6 +44,8 @@ Startup Boot
 
 A03 不使用外部 `cansend`，PDO 收发由 Lely `OnRpdo()`、`OnTpdo()`、`RpdoMapped()` 和 `TpdoMapped()` 完成。A04 同样不构造原始 CAN 帧，SYNC 由 Lely 本地 `0x1006` producer 定时器产生，并通过 `OnSync()` 与 `OnRpdo()` 建立同步时序证据。当前 EDS/DCF 已包含 A03/A04 所需的默认 PDO 和 SYNC 配置，不需要为该测试重新生成配置。
 
+A05 TIME Consumer 的主机侧流程已经实现，但 `CANOPEN_ENABLE_TIME_PROCESS` 当前默认保持 `0`，因此不进入自动流程。启用前，MCU 测试固件必须提供只读诊断记录 `0x2300:01..03`：合法 DLC=6 TIME 接收计数、`CO_TIME_t::ms` 和 `CO_TIME_t::days`。A05 通过现有 Lely CAN network 发送精确 TIME 测试帧，不创建额外 SocketCAN raw socket；待 MCU 诊断对象实现并验证后再把该流程开关改为 `1`。
+
 ## 流程私有配置
 
 公共 `include/canopen_config.h` 只保留运行环境、Node-ID、公共等待时间和流程开关。测试对象、probe value、采样数量、周期容差等流程专用参数保存在对应 `.cpp` 的匿名命名空间中：
@@ -51,7 +53,8 @@ A03 不使用外部 `cansend`，PDO 收发由 Lely `OnRpdo()`、`OnTpdo()`、`Rp
 - A01：`src/nmt_heartbeat.cpp`；
 - A02：`src/sdo_process.cpp`；
 - A03：`src/pdo_process.cpp`；
-- A04：`src/sync_pdo_process.cpp`。
+- A04：`src/sync_pdo_process.cpp`；
+- A05：`src/time_process.cpp`（主机侧已实现，默认关闭）。
 
 从机基线 Heartbeat 和 PDO 通信参数仍以 `config/master.yml`、EDS 和生成后的 DCF 为准。
 
@@ -65,10 +68,12 @@ include/nmt_heartbeat.h            A01/Boot 接口
 include/sdo_process.h              A02 接口
 include/pdo_process.h              A03 接口
 include/sync_pdo_process.h         A04 接口
+include/time_process.h             A05 TIME consumer 接口（默认关闭）
 src/nmt_heartbeat.cpp              Boot、Heartbeat、EMCY 和 A01
 src/sdo_process.cpp                A02 用户 OD SDO 验证
 src/pdo_process.cpp                A03 RPDO/TPDO 验证
 src/sync_pdo_process.cpp           A04 SYNC consumer/同步 TPDO 验证
+src/time_process.cpp               A05 TIME consumer 主机侧验证
 src/main.cpp                       Lely 生命周期和自动流程注册
 src/shutdown_process.cpp           Final Reset Communication
 ```
