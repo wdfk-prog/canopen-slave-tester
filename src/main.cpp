@@ -4,8 +4,10 @@
  */
 
 #include "canopen_config.h"
+#include "canopen_emcy.h"
 #include "canopen_nmt.h"
 #include "canopen_process.h"
+#include "emcy_process.h"
 #include "nmt_heartbeat.h"
 #include "pdo_process.h"
 #include "sdo_process.h"
@@ -44,7 +46,8 @@ const std::array<CanopenProcessEntry,
                      + CANOPEN_ENABLE_SDO_PROCESS
                      + CANOPEN_ENABLE_PDO_PROCESS
                      + CANOPEN_ENABLE_SYNC_PDO_PROCESS
-                     + CANOPEN_ENABLE_TIME_PROCESS>
+                     + CANOPEN_ENABLE_TIME_PROCESS
+                     + CANOPEN_ENABLE_EMCY_PROCESS>
     g_canopen_processes = {{
 #if CANOPEN_ENABLE_HEARTBEAT_PROCESS
         {"A01 Heartbeat", heartbeatProcess},
@@ -61,6 +64,9 @@ const std::array<CanopenProcessEntry,
 #if CANOPEN_ENABLE_TIME_PROCESS
         {"A05 TIME", timeProcess},
 #endif /* CANOPEN_ENABLE_TIME_PROCESS */
+#if CANOPEN_ENABLE_EMCY_PROCESS
+        {"A06 EMCY", emcyProcess},
+#endif /* CANOPEN_ENABLE_EMCY_PROCESS */
     }};
 
 /** Signal-safe shutdown request flag; zero means no termination signal yet. */
@@ -203,7 +209,7 @@ int main(void)
      * master.Reset(); this gates every automatic process. */
     bool startup_boot_succeeded = false;
     /* The master owns local OD state, SDO/PDO services, NMT control, and all
-     * callbacks used by the enabled A01-A05 processes. */
+     * callbacks used by the enabled A01-A06 processes. */
     lely::canopen::AsyncMaster master(
         executor, timer, channel, CANOPEN_MASTER_DCF_PATH, "",
         CANOPEN_MASTER_NODE_ID);
@@ -213,6 +219,7 @@ int main(void)
      * state indications used by later confirmed NMT command waits. */
     registerNmtStateCallback(master);
     registerNmtHeartbeatCallbacks(master);
+    registerCanopenEmcyCallback(master);
 
     /* Run the event loop on a dedicated thread so process functions can wait
      * synchronously for callbacks without blocking Lely itself. */

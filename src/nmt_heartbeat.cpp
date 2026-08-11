@@ -1,11 +1,12 @@
 /**
  * @file
- * @brief Implements Boot, Heartbeat, and related EMCY test handling.
+ * @brief Implements Boot and bidirectional Heartbeat test handling.
  */
 
 #include "nmt_heartbeat.h"
 
 #include "canopen_config.h"
+#include "canopen_emcy.h"
 #include "canopen_nmt.h"
 #include "canopen_sdo.h"
 
@@ -69,16 +70,6 @@ std::condition_variable g_heartbeat_condition;
 bool g_expected_heartbeat_occurred = false;
 /** false means the currently selected heartbeat event has not arrived yet. */
 bool g_expected_heartbeat_received = false;
-
-/** Protects expected/observed EMCY state shared with the event loop. */
-std::mutex g_emcy_mutex;
-/** Wakes the process when the selected EMCY code is received. */
-std::condition_variable g_emcy_condition;
-/** Start with the benign reset code; prepareEmcyWait() always selects the
- * actual expected code before each assertion. */
-std::uint16_t g_expected_emcy_code = kEmcyResetCode;
-/** false means the selected EMCY code has not been observed yet. */
-bool g_expected_emcy_received = false;
 
 /**
  * @brief Store Boot completion reported by the Lely event-loop thread.
@@ -161,78 +152,6 @@ void heartbeatCallback(std::uint8_t node_id, bool occurred) noexcept
         spdlog::info("Remote heartbeat recovered: node={}",
                      static_cast<unsigned int>(node_id));
     }
-}
-
-/**
- * @brief Log node EMCY data and notify a matching Heartbeat test wait.
- *
- * @param node_id Node that produced the EMCY message.
- * @param error_code EMCY error code.
- * @param error_register Remote error register value.
- * @param manufacturer_data Five manufacturer-specific EMCY bytes.
- */
-void emcyCallback(std::uint8_t node_id, std::uint16_t error_code,
-                  std::uint8_t error_register,
-                  std::uint8_t manufacturer_data[5]) noexcept
-{
-    if (node_id != CANOPEN_SLAVE_NODE_ID) {
-        return;
-    }
-
-    /* Ignore EMCY traffic unrelated to the code selected by prepareEmcyWait(). */
-    bool matched = false;
-    {
-        /* Protect the expected code and received flag from concurrent access. */
-        std::lock_guard<std::mutex> lock(g_emcy_mutex);
-        if (error_code == g_expected_emcy_code) {
-            g_expected_emcy_received = true;
-            matched = true;
-        }
-    }
-    if (matched) {
-        g_emcy_condition.notify_all();
-    }
-
-    spdlog::info(
-        "EMCY callback: node={} code=0x{:04x} error_register=0x{:02x} "
-        "manufacturer={:02x} {:02x} {:02x} {:02x} {:02x}",
-        static_cast<unsigned int>(node_id),
-        static_cast<unsigned int>(error_code),
-        static_cast<unsigned int>(error_register),
-        static_cast<unsigned int>(manufacturer_data[0]),
-        static_cast<unsigned int>(manufacturer_data[1]),
-        static_cast<unsigned int>(manufacturer_data[2]),
-        static_cast<unsigned int>(manufacturer_data[3]),
-        static_cast<unsigned int>(manufacturer_data[4]));
-}
-
-/**
- * @brief Select the next expected EMCY code and discard any older result.
- *
- * @param expected_error_code EMCY code expected by the automatic test.
- */
-void prepareEmcyWait(std::uint16_t expected_error_code)
-{
-    /* Reset both selector and completion state atomically before an operation
-     * that can immediately generate the expected EMCY. */
-    std::lock_guard<std::mutex> lock(g_emcy_mutex);
-    g_expected_emcy_code = expected_error_code;
-    g_expected_emcy_received = false;
-}
-
-/**
- * @brief Wait for the selected EMCY code.
- *
- * @param timeout Maximum wait duration.
- * @return true when the selected code is received; otherwise false.
- */
-bool waitForEmcy(std::chrono::milliseconds timeout)
-{
-    /* unique_lock is required because condition_variable::wait_for releases
-     * the mutex while the event-loop thread executes the callback. */
-    std::unique_lock<std::mutex> lock(g_emcy_mutex);
-    return g_emcy_condition.wait_for(
-        lock, timeout, []() { return g_expected_emcy_received; });
 }
 
 /**
@@ -384,7 +303,6 @@ void registerNmtHeartbeatCallbacks(lely::canopen::AsyncMaster& master)
 {
     master.OnBoot(bootCallback);
     master.OnHeartbeat(heartbeatCallback);
-    master.OnEmcy(emcyCallback);
 }
 
 void prepareBootWait()
@@ -422,9 +340,9 @@ int heartbeatProcess(lely::canopen::AsyncMaster& master)
     std::this_thread::sleep_for(std::chrono::milliseconds(
         kHeartbeatPeriodMs * kHeartbeatSampleCount));
 
-    /* Step 2: stop the master's local Producer Heartbeat (0x1017 = 0) and
-     * verify the slave reports heartbeat-consumer timeout EMCY 0x8130. */
-    prepareEmcyWait(kHeartbeatConsumerEmcyCode);
+    /* Step 2: snapshot the shared EMCY stream before stopping the master's
+     * Producer Heartbeat so an older 0x8130 cannot satisfy this assertion. */
+    const std::uint64_t fault_sequence = snapshotCanopenEmcySequence();
     master.Write<std::uint16_t>(kHeartbeatIndex,
                                 kHeartbeatSubindex,
                                 static_cast<std::uint16_t>(0), error);
@@ -435,16 +353,23 @@ int heartbeatProcess(lely::canopen::AsyncMaster& master)
     }
     spdlog::info("Master producer heartbeat stopped");
 
-    if (!waitForEmcy(std::chrono::milliseconds(kHeartbeatTimeoutMs))) {
+    CanopenEmcyEvent fault_event;
+    if (!waitForCanopenEmcyEvent(
+            fault_sequence, CANOPEN_SLAVE_NODE_ID,
+            kHeartbeatConsumerEmcyCode,
+            std::chrono::milliseconds(kHeartbeatTimeoutMs), fault_event)) {
         spdlog::error("Heartbeat consumer EMCY 0x8130 timed out");
         result = 1;
     } else {
-        spdlog::info("Remote node detected master heartbeat timeout");
+        spdlog::info(
+            "Remote node detected master heartbeat timeout: "
+            "error_register=0x{:02x}",
+            static_cast<unsigned int>(fault_event.error_register));
     }
 
-    /* Step 3: restore the master's 500 ms heartbeat and require the slave's
-     * EMCY reset indication before moving on. */
-    prepareEmcyWait(kEmcyResetCode);
+    /* Step 3: snapshot again before restoring the master's 500 ms heartbeat
+     * and require a new EMCY reset indication. */
+    const std::uint64_t recovery_sequence = snapshotCanopenEmcySequence();
     error.clear();
     master.Write<std::uint16_t>(
         kHeartbeatIndex, kHeartbeatSubindex,
@@ -456,7 +381,10 @@ int heartbeatProcess(lely::canopen::AsyncMaster& master)
     }
     spdlog::info("Master producer heartbeat restored");
 
-    if (!waitForEmcy(std::chrono::milliseconds(kHeartbeatTimeoutMs))) {
+    CanopenEmcyEvent recovery_event;
+    if (!waitForCanopenEmcyEvent(
+            recovery_sequence, CANOPEN_SLAVE_NODE_ID, kEmcyResetCode,
+            std::chrono::milliseconds(kHeartbeatTimeoutMs), recovery_event)) {
         spdlog::error("Heartbeat consumer EMCY reset timed out");
         return 1;
     }

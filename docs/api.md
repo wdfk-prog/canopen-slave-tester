@@ -53,7 +53,7 @@ int heartbeatProcess(
     lely::canopen::AsyncMaster& master);
 ```
 
-模块注册 `OnBoot()`、`OnHeartbeat()` 和 `OnEmcy()`，并在内部维护 Boot、Heartbeat 和 EMCY 的等待状态。`CANOPEN_ENABLE_HEARTBEAT_PROCESS` 作为 A01 专属注册开关位于 `include/nmt_heartbeat.h`；对象索引、等待时间、采样数量和 Producer Heartbeat 周期位于 `src/nmt_heartbeat.cpp`，不暴露为公共宏。
+模块只注册 `OnBoot()` 和 `OnHeartbeat()`；EMCY 由共享 observer 注册并通过 sequence-based wait 提供给 A01。`CANOPEN_ENABLE_HEARTBEAT_PROCESS` 作为 A01 专属注册开关位于 `include/nmt_heartbeat.h`；对象索引、等待时间、采样数量和 Producer Heartbeat 周期位于 `src/nmt_heartbeat.cpp`，不暴露为公共宏。
 
 ## A02 SDO
 
@@ -96,6 +96,36 @@ int timeProcess(
 A05 使用公共远端 SDO helper 保存、修改和恢复从机 `0x1012:00`，并通过 Lely 内部 CAN network 发送可控 TIME 帧。MCU 必须提供只读诊断记录 `0x2300:01..03`，分别表示合法 DLC=6 TIME 接收计数、应用层 `CO_TIME_t::ms` 和 `CO_TIME_t::days`。主机通过接收计数确认帧到达，通过 `ms/days` 独立确认 TIME 是否真正被应用。当前 `CANOPEN_ENABLE_TIME_PROCESS=0`，在 MCU 诊断对象落地前不注册 A05。
 
 禁用 consumer 时，CANopenNode 动态 `0x1012` 写入只改变 `isConsumer`，不会注销已经建立的 RX buffer；因此 A05 允许合法 TIME 接收计数继续增加，但要求 `ms/days` 只按已有时间自然推进，不能跳到测试时间戳。若测试从初始 consumer-disabled 状态启用 bit31，A05 会执行一次 Reset Communication，使 CANopenNode 按新 `0x1012` 重新建立 TIME RX buffer。
+
+## 共享 EMCY observer
+
+声明位置：`include/canopen_emcy.h`。
+
+```cpp
+struct CanopenEmcyEvent;
+
+void registerCanopenEmcyCallback(
+    lely::canopen::AsyncMaster& master);
+
+std::uint64_t snapshotCanopenEmcySequence();
+
+bool waitForCanopenEmcyEvent(...);
+
+std::vector<CanopenEmcyEvent> getCanopenEmcyEventsAfter(...);
+```
+
+Lely `OnEmcy()` 同时只能注册一个函数，因此 `main.cpp` 只注册一次共享 callback。observer 为每条 EMCY 分配单调 sequence、记录 `steady_clock` 时间戳并保留最近 32 条事件；A01/A06 在触发动作前 snapshot sequence，只接受之后发布的事件，从而避免旧 callback 满足新断言。
+
+## A06 EMCY Producer
+
+声明位置：`include/emcy_process.h`。
+
+```cpp
+int emcyProcess(
+    lely::canopen::AsyncMaster& master);
+```
+
+A06 不写 `0x1016`。它读取从机 `0x1001/0x1003/0x1014/0x1015`，基础 EMCY 阶段先临时把 `0x1015` 置 0 并回读以隔离 inhibit 影响，再以停止主站本地 `0x1017` 作为 EMCY fault source；动态 COB-ID 测试同时切换从机 `0x1014` 和主站本地 `0x1028:01`，且遵守 disable/change/enable 约束。测试值 `0x681` 和 `0x1015=15000` 仅存在于运行期，结束时恢复保存值并回读。
 
 ## Final Reset
 

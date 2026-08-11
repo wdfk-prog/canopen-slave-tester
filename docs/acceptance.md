@@ -1,11 +1,11 @@
-# A01-A04 自动测试验收
+# A01-A06 自动测试验收
 
 ## 本地静态验收
 
 确认流程注册和 Lely PDO API：
 
 ```sh
-grep -R "heartbeatProcess\|sdoProcess\|pdoProcess\|syncPdoProcess" src include
+grep -R "heartbeatProcess\|sdoProcess\|pdoProcess\|syncPdoProcess\|timeProcess\|emcyProcess" src include
 grep -R "OnRpdo\|OnTpdo\|RpdoMapped\|TpdoMapped\|WriteEvent" \
     src/pdo_process.cpp include/pdo_process.h
 ```
@@ -209,6 +209,22 @@ Final Reset Communication completed
 
 随后 event loop 退出，工作线程完成 `join()`。若未收到退出信号而 event loop 提前停止，进程必须记录错误并返回失败。
 
+## A06 EMCY
+
+前置：从机实际固件必须启用 `PKG_CANOPENNODE_EM_PROD_CONFIGURABLE`、`PKG_CANOPENNODE_EM_PROD_INHIBIT` 和 `PKG_CANOPENNODE_EM_HISTORY`；初始 `0x1001` 必须为 0。A06 不修改 `0x1016`。
+
+通过条件：
+
+1. 原 EMCY COB-ID 上先将从机 `0x1015` 临时写 0 并回读，再停止主站 Heartbeat；收到 fresh `0x8130`，EMCY Error Register 与从机 `0x1001` 一致且 communication bit 置位；
+2. `0x1003:01` 对应 `0x8130`、同一 Error Register 和 CANopenNode error bit `0x1B`；保持 fault 1000 ms 不出现额外 EMCY；
+3. 恢复 Heartbeat 后收到 fresh `0x0000`，`0x1001=0`，`0x1003:01/02` 对应 reset/fault；测试不得写 `0x1003:00=0` 清历史；
+4. 从机 `0x1014` 先 disable，主站本地 `0x1028:01` 按 disable/change 切到 `0x681`，随后从机 `0x1014` 启用 `0x681`；两侧 readback 必须一致；
+5. `0x1015=15000` 回读一致；在 `0x681` 路径上 fault 后立即恢复 Heartbeat，reset EMCY 与 fault EMCY 的单调时间戳间隔必须在 1400..2500 ms；
+6. 清理恢复保存的主站 `0x1017`、从机 `0x1015`、主站 `0x1028:01` 和从机 `0x1014`，所有值均回读一致；
+7. 恢复原 COB-ID 后再次完成 `0x8130 -> 0x0000` smoke test，并成功读取从机 `0x1000`；最终 `0x1001=0`。
+
+辅助 `candump` 可确认动态阶段出现 `681#...`，但抓包不是唯一 PASS 依据，测试驱动仍全部使用 Lely/SDO。
+
 ## 验收矩阵
 
 | 编号 | 项目 | 通过判据 |
@@ -229,5 +245,9 @@ Final Reset Communication completed
 | 14 | A04 quiet window | 无 SYNC 时无同步 TPDO1 |
 | 15 | A04 sync/TPDO timing | 5 SYNC 对应 5 TPDO1，均位于对应同步周期 |
 | 16 | A04 cleanup | 0x1800 全快照恢复并回读，事件型 TPDO 周期恢复 |
-| 17 | 正常退出 | Final Reset Communication 完成 |
-| 18 | 完整验证 | 交叉构建、目标抓包和本地多轮复审均有实际证据 |
+| 17 | A06 EMCY state/history | 0x8130/0x0000 与 0x1001/0x1003 一致，无 active-error 重复 EMCY |
+| 18 | A06 configurable COB-ID | slave 0x1014 与 master 0x1028:01 都切到 0x681 并可收到 EMCY |
+| 19 | A06 inhibit | 0x1015=15000 时 fault/reset 间隔 1400..2500 ms |
+| 20 | A06 cleanup | 0x1014/0x1015/0x1028/0x1017 全部恢复并回读，原 COB-ID smoke test 通过 |
+| 21 | 正常退出 | Final Reset Communication 完成 |
+| 22 | 完整验证 | 交叉构建、目标抓包和本地多轮复审均有实际证据 |

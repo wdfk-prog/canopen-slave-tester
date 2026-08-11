@@ -1,8 +1,8 @@
-# A01-A04 自动测试设计
+# A01-A06 自动测试设计
 
 ## 设计边界
 
-当前自动流程直接复用单个 `lely::canopen::AsyncMaster`，不创建 `BasicDriver`、`SlaveSession` 或重复协议 Service。`main.cpp` 只负责 Lely/SocketCAN 生命周期、Startup Boot、流程注册和退出；A01/A02/A03/A04 各自持有测试私有参数、等待状态和断言逻辑。
+当前自动流程直接复用单个 `lely::canopen::AsyncMaster`，不创建 `BasicDriver`、`SlaveSession` 或重复协议 Service。`main.cpp` 只负责 Lely/SocketCAN 生命周期、Startup Boot、流程注册和退出；A01/A02/A03/A04/A05/A06 各自持有测试私有参数和断言逻辑；EMCY 因 Lely 只有一个 `OnEmcy()` callback 槽，由共享 observer 统一接收。
 
 当前顺序：
 
@@ -12,6 +12,8 @@ Startup Boot
 → A02 SDO
 → A03 PDO
 → A04 SYNC PDO
+→ A05 TIME
+→ A06 EMCY
 → 等待 Ctrl+C/SIGTERM
 → Final Reset Communication
 ```
@@ -23,16 +25,21 @@ Startup Boot
 ```text
 src/main.cpp
 ├─ 创建并持有全部 Lely 和 SocketCAN 对象
-├─ 注册 CAN/Boot/Heartbeat/EMCY callback
+├─ 注册 CAN/Boot/Heartbeat callback 和共享 EMCY observer
 ├─ 启动 Loop::run() 工作线程
 ├─ Reset 并等待 Startup Boot
-├─ canopenRunProcesses(A01, A02, A03, A04)
+├─ canopenRunProcesses(A01, A02, A03, A04, A05, A06)
 ├─ 等待退出信号
 ├─ finalResetProcess()
 └─ shutdown Context 并 join 线程
 
+src/canopen_emcy.cpp
+├─ 独占 Lely OnEmcy() callback
+├─ 固定容量 EMCY event cache、sequence 与 monotonic timestamp
+└─ A01/A06 共用 sequence-based wait
+
 src/nmt_heartbeat.cpp
-├─ Boot/Heartbeat/EMCY callback 和等待状态
+├─ Boot/Heartbeat callback 和等待状态
 ├─ A01 私有 Heartbeat 参数
 ├─ 主站 Producer Heartbeat 中断/恢复
 └─ 通过 SDO 中断/恢复从机 Producer Heartbeat
@@ -55,6 +62,13 @@ src/sync_pdo_process.cpp
 ├─ TPDO1 0x1800 参数保存、同步切换与恢复
 ├─ OnSync/OnRpdo 同步时序观测
 └─ 恢复后事件型 TPDO1 周期验证
+
+src/emcy_process.cpp
+├─ A06 读取 0x1001/0x1003/0x1014/0x1015 基线
+├─ Heartbeat timeout 仅作为确定性 EMCY fault source
+├─ 从机 0x1014 与主站本地 0x1028:01 联动切换
+├─ 0x1015 inhibit timestamp 断言
+└─ 全量恢复、回读和原 COB-ID smoke test
 
 src/shutdown_process.cpp
 └─ Reset Communication 并等待 Boot callback
@@ -116,7 +130,7 @@ restored event timer tolerance = +/-150 ms
 → waitForBootCompletion()
 ```
 
-Boot callback `status == 0` 或 `status == 'L'` 视为可继续自动流程。其他结果或等待超时阻止 A01-A04。
+Boot callback `status == 0` 或 `status == 'L'` 视为可继续自动流程。其他结果或等待超时阻止 A01-A06。
 
 ## A01 Heartbeat
 
@@ -283,6 +297,38 @@ SYNC[4] <= TPDO1[4] < SYNC[4] + 200 ms
 
 NMT 状态确认存在一个已知且当前接受的极低概率并发边界。`issueNmtCommandAndWaitForState()` 的 generation 只能排除在命令基线之前**已经发布到缓存**的旧状态；Lely `OnState()` 本身没有 command token，因此如果一个旧的 `PREOP` callback 在本次 `ENTER_PREOP` 之前已经进入分发，但恰好阻塞在 `g_nmt_state_mutex`，它仍可能在 `Command()` 之后才发布并递增 generation，从而被当作新的 PREOP 证据。该窗口要求非常特定的线程调度顺序，当前没有实机证据或稳定复现，项目选择不为此引入额外 command epoch、第二套回调队列或更复杂的同步状态机。后续审查不把该理论竞态作为必须修复项；只有出现实际日志证据、目标板复现或相关功能异常时才重新评估。
 
+## A06 EMCY Producer
+
+A06 不再修改 `0x1016`，Heartbeat Consumer 的功能性覆盖留在 A01。A06 复用停止主站 Producer Heartbeat 产生 CANopenNode `0x8130`，但断言对象转为 EMCY producer 本身。
+
+首先在原 COB-ID 上验证：
+
+```text
+0x1001 == 0 前置
+→ 临时写 0x1015=0 并回读，隔离基础 EMCY 行为
+→ 停止主站 0x1017
+→ shared OnEmcy 收到 0x8130
+→ EMCY Error Register == SDO 0x1001，communication bit 置位
+→ 0x1003 newest 与 0x8130/error register/error bit 0x1B 一致
+→ 保持 fault 1 s，不允许第二条 EMCY
+→ 恢复主站 0x1017
+→ 收到 0x0000，0x1001 清零，0x1003 newest/previous 对应 reset/fault
+```
+
+这里的 reset 历史行为是当前 CANopenNode 实现特性：`CO_error()` 在 error set/reset 两种状态切换时都会把消息压入 EMCY FIFO，`0x1003` 直接读取该 FIFO，因此一个 fault/recovery pair 会增加两条记录。A06 按当前被测 CANopenNode 版本验证这一行为，不把它泛化为其他 CANopen 栈的通用实现要求。
+
+随后验证 configurable COB-ID。CANopenNode 与 Lely 都禁止“有效旧 CAN-ID直接切为另一个有效 CAN-ID”，所以顺序固定为：
+
+```text
+slave 0x1014: old -> old|bit31
+master 0x1028:01: old -> old|bit31 -> 0x681
+slave 0x1014: disabled old -> 0x681
+```
+
+主机和从机回读都为 `0x681` 后，写从机 `0x1015=15000`（100 us 单位，即 1.5 s），再次制造 fault 并立即恢复 Heartbeat。共享 observer 的 `steady_clock` 时间戳要求 reset EMCY 相对 fault EMCY 的间隔位于 1400..2500 ms。
+
+清理始终恢复保存值而不是硬编码默认值：先恢复主站 Heartbeat 并轮询 `0x1001` 清零，再恢复 `0x1015`，禁用当前 slave EMCY producer，恢复 master `0x1028:01`，最后恢复 slave `0x1014`。全部回读一致后再在原 COB-ID 上执行一次 fault/reset 和 `0x1000` SDO smoke read。`0x1003` 不清空，以免删除测试前历史。
+
 ## 退出
 
 收到 `SIGINT` 或 `SIGTERM` 后：
@@ -295,15 +341,16 @@ finalResetProcess(master)
 → join event-loop thread
 ```
 
-由于 `boot:true`，Final Reset 会再次执行节点配置。主站随后退出导致节点 1 检测到主站 Heartbeat 丢失，属于真实离线行为，不计入 A01-A04 自动测试结果。
+由于 `boot:true`，Final Reset 会再次执行节点配置。主站随后退出导致节点 1 检测到主站 Heartbeat 丢失，属于真实离线行为，不计入 A01-A06 自动测试结果。
 
 ## 兼容性和影响范围
 
 - 保持单个 `AsyncMaster` 和现有 event-loop 线程模型；
 - 不引入 `BasicDriver`、第二套 CANopen 协议层或外部 `cansend`；
-- 不修改 CANopenNode、RT-Thread、Lely、EDS、DCF 或 MCU 固件；
+- 不修改 CANopenNode、RT-Thread CAN core、Lely、EDS 或 DCF；从机仅需在 BSP 配置中开启 `PKG_CANOPENNODE_EM_PROD_CONFIGURABLE`；
 - 不改变 CAN 接口、Node-ID、目标部署目录或 CMake target；
 - A01 的等待参数改为流程私有常量，其中 callback/SDO wait 为 3000 ms，稳定等待为 5 个 500 ms 周期；
 - A02 测试对象和 probe value 改为流程私有命名；
 - 新增 A03 流程开关和 `pdoProcess()` 工程内部接口；
-- 新增 A04 流程开关和 `syncPdoProcess()` 工程内部接口；A04 只临时修改运行期 `0x1800` 和主站本地 `0x1006`，不修改 EDS/DCF。
+- 新增 A04 流程开关和 `syncPdoProcess()` 工程内部接口；A04 只临时修改运行期 `0x1800` 和主站本地 `0x1006`，不修改 EDS/DCF；
+- 新增共享 `canopen_emcy` observer 和 A06 `emcyProcess()`；A06 只临时修改 `0x1014/0x1015/0x1028:01/0x1017` 并严格恢复。

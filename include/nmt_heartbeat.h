@@ -1,6 +1,6 @@
 /**
  * @file
- * @brief Boot, Heartbeat, and related EMCY test interfaces.
+ * @brief Boot and bidirectional Heartbeat test interfaces.
  */
 
 #ifndef NMT_HEARTBEAT_H
@@ -18,7 +18,10 @@ class AsyncMaster;
 } // namespace lely
 
 /**
- * @brief Register callbacks used by the bidirectional Heartbeat test.
+ * @brief Register Boot and Heartbeat callbacks used by A01.
+ *
+ * EMCY observation is registered separately through the shared observer so
+ * A01 and A06 do not compete for Lely's single OnEmcy() callback slot.
  *
  * @param master Lely asynchronous master that owns the callback hooks.
  */

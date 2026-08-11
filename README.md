@@ -1,6 +1,6 @@
 # CANopen Master 自动协议测试
 
-本工程基于 Lely CANopen，面向 TQ8MP Linux/aarch64 主站与 RT-Thread + CANopenNode MCU 从机。当前自动流程按顺序执行 A01 Heartbeat、A02 SDO、A03 RPDO/TPDO 和 A04 SYNC/同步 TPDO；任一流程失败后停止执行后续自动流程。测试结束后程序继续运行，直到收到 `Ctrl+C`/`SIGTERM`，再执行 Final Reset Communication 并退出。
+本工程基于 Lely CANopen，面向 TQ8MP Linux/aarch64 主站与 RT-Thread + CANopenNode MCU 从机。当前自动流程按顺序执行 A01 Heartbeat、A02 SDO、A03 RPDO/TPDO、A04 SYNC/同步 TPDO、A05 TIME 和 A06 EMCY；任一流程失败后停止执行后续自动流程。测试结束后程序继续运行，直到收到 `Ctrl+C`/`SIGTERM`，再执行 Final Reset Communication 并退出。
 
 ## 自动测试链路
 
@@ -38,13 +38,20 @@ Startup Boot
    → Lely 主站周期发送 5 个 SYNC，验证每个 SYNC 对应 1 个 TPDO1
    → 停止 SYNC，恢复并回读 TPDO1 原参数
    → 无 SYNC 下验证恢复后的事件型 TPDO1 周期
+→ A05 TIME
+   → 通过 0x2300 诊断对象验证 TIME consumer
+→ A06 EMCY
+   → 共享 OnEmcy 事件流验证 0x8130/0x0000、0x1001 和 0x1003
+   → 0x1014 与主站本地 0x1028:01 按 disable/change/enable 联动切换到 0x681
+   → 设置 0x1015=15000，按单调时间戳验证 1.5 s inhibit
+   → 恢复 0x1014/0x1015/0x1028/主站 Heartbeat 并执行原 COB-ID smoke test
 → 等待 Ctrl+C
 → Final Reset Communication
 ```
 
 A03 不使用外部 `cansend`，PDO 收发由 Lely `OnRpdo()`、`OnTpdo()`、`RpdoMapped()` 和 `TpdoMapped()` 完成。A04 同样不构造原始 CAN 帧，SYNC 由 Lely 本地 `0x1006` producer 定时器产生，并通过 `OnSync()` 与 `OnRpdo()` 建立同步时序证据。当前 EDS/DCF 已包含 A03/A04 所需的默认 PDO 和 SYNC 配置，不需要为该测试重新生成配置。
 
-A05 TIME Consumer 的主机侧流程已经实现，但 `CANOPEN_ENABLE_TIME_PROCESS` 当前默认保持 `0`，因此不进入自动流程。启用前，MCU 测试固件必须提供只读诊断记录 `0x2300:01..03`：合法 DLC=6 TIME 接收计数、`CO_TIME_t::ms` 和 `CO_TIME_t::days`。A05 通过现有 Lely CAN network 发送精确 TIME 测试帧，不创建额外 SocketCAN raw socket；待 MCU 诊断对象实现并验证后再把该流程开关改为 `1`。
+A05 TIME Consumer 当前已进入自动流程；MCU 测试固件必须提供只读诊断记录 `0x2300:01..03`：合法 DLC=6 TIME 接收计数、`CO_TIME_t::ms` 和 `CO_TIME_t::days`。A05 通过现有 Lely CAN network 发送精确 TIME 测试帧，不创建额外 SocketCAN raw socket。
 
 ## 流程私有配置
 
@@ -54,7 +61,8 @@ A05 TIME Consumer 的主机侧流程已经实现，但 `CANOPEN_ENABLE_TIME_PROC
 - A02：`src/sdo_process.cpp`；
 - A03：`src/pdo_process.cpp`；
 - A04：`src/sync_pdo_process.cpp`；
-- A05：`src/time_process.cpp`（主机侧已实现，默认关闭）。
+- A05：`src/time_process.cpp`；
+- A06：`src/emcy_process.cpp`，共享 EMCY 事件层位于 `src/canopen_emcy.cpp`。
 
 从机基线 Heartbeat 和 PDO 通信参数仍以 `config/master.yml`、EDS 和生成后的 DCF 为准。
 
@@ -68,12 +76,16 @@ include/nmt_heartbeat.h            A01/Boot 接口
 include/sdo_process.h              A02 接口
 include/pdo_process.h              A03 接口
 include/sync_pdo_process.h         A04 接口
-include/time_process.h             A05 TIME consumer 接口（默认关闭）
-src/nmt_heartbeat.cpp              Boot、Heartbeat、EMCY 和 A01
+include/time_process.h             A05 TIME consumer 接口
+include/canopen_emcy.h              共享 EMCY event observer
+include/emcy_process.h              A06 EMCY producer 接口
+src/canopen_emcy.cpp                唯一 OnEmcy callback、序列化缓存与时间戳
+src/nmt_heartbeat.cpp              Boot、Heartbeat 和 A01
 src/sdo_process.cpp                A02 用户 OD SDO 验证
 src/pdo_process.cpp                A03 RPDO/TPDO 验证
 src/sync_pdo_process.cpp           A04 SYNC consumer/同步 TPDO 验证
 src/time_process.cpp               A05 TIME consumer 主机侧验证
+src/emcy_process.cpp               A06 EMCY/0x1001/0x1003/0x1014/0x1015 验证
 src/main.cpp                       Lely 生命周期和自动流程注册
 src/shutdown_process.cpp           Final Reset Communication
 ```
@@ -92,7 +104,7 @@ cd config
     master.yml
 ```
 
-A03/A04 当前直接使用既有 `project.eds`/`master.dcf` 映射和 SYNC 对象。A04 只在运行期临时修改节点 1 的 `0x1800` 并恢复，不修改配置源；只有基线通信参数或映射本身发生变化时才需要重新生成 DCF。
+A03/A04 当前直接使用既有 `project.eds`/`master.dcf` 映射和 SYNC 对象。A06 不永久修改 EDS/DCF；运行期临时同时修改从机 `0x1014` 和主站本地 `0x1028:01`，测试后恢复并回读。A04 只在运行期临时修改节点 1 的 `0x1800` 并恢复，不修改配置源；只有基线通信参数或映射本身发生变化时才需要重新生成 DCF。
 
 详细检查项见 [`docs/configuration.md`](docs/configuration.md) 和 [`docs/acceptance.md`](docs/acceptance.md)。
 
