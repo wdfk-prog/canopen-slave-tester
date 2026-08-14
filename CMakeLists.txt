@@ -76,6 +76,10 @@ endif()
 
 find_package(Threads REQUIRED)
 
+# Build the pinned vendored spdlog sources once as a static archive. The
+# spdlog::spdlog target propagates SPDLOG_COMPILED_LIB to all consumers.
+add_subdirectory(third_party/spdlog)
+
 function(canopen_apply_warnings target_name)
     if(NOT CANOPEN_ENABLE_WARNINGS)
         return()
@@ -102,12 +106,6 @@ function(canopen_apply_debug_options target_name)
             $<$<CONFIG:Debug>:-fno-optimize-sibling-calls>)
     endif()
 endfunction()
-
-add_library(canopen_spdlog INTERFACE)
-target_include_directories(canopen_spdlog
-    SYSTEM INTERFACE
-        "${CMAKE_CURRENT_SOURCE_DIR}/third_party/spdlog/include")
-target_link_libraries(canopen_spdlog INTERFACE Threads::Threads)
 
 set(LELY_COAPP_LIBRARY "${LELY_LIBRARY_DIR}/liblely-coapp.so")
 set(LELY_IO2_LIBRARY "${LELY_LIBRARY_DIR}/liblely-io2.so")
@@ -154,7 +152,7 @@ target_link_options(${TARGET_NAME}
 
 target_link_libraries(${TARGET_NAME}
     PRIVATE
-        canopen_spdlog
+        spdlog::spdlog
         "${LELY_COAPP_LIBRARY}"
         "${LELY_IO2_LIBRARY}"
         "${LELY_EV_LIBRARY}"

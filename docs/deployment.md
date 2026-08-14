@@ -2,11 +2,16 @@
 
 ## 构建
 
+普通部署默认使用 `MinSizeRel`：
+
 ```sh
 rm -rf build
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
+cmake -S . -B build
 cmake --build build --verbose -j"$(nproc)"
 ```
+
+首次构建会自动生成 `build/third_party/spdlog/libspdlog.a` 并静态链接到 Host，
+不需要单独编译或部署 spdlog 动态库。
 
 输出：
 
@@ -23,8 +28,18 @@ build/canopen_master.map
 | `debug-deploy` | 要求 Debug 构建，上传 `.elf` 并启动 gdbserver |
 | `debug` | 兼容别名，依赖 `debug-deploy` |
 
+普通部署：
+
 ```sh
 cmake --build build --target download
+```
+
+远程调试前必须显式重新配置为 `Debug`：
+
+```sh
+rm -rf build
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
+cmake --build build --verbose -j"$(nproc)"
 cmake --build build --target debug-deploy
 ```
 

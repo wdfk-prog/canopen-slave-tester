@@ -39,22 +39,26 @@ Host 语法检查：
 for f in src/*.cpp; do
     c++ -std=c++14 -Wall -Wextra -Wpedantic -Wconversion \
         -Wsign-conversion -Wshadow -Werror=return-type -fsyntax-only \
-        -Iinclude -isystem <lely-include> \
+        -DSPDLOG_COMPILED_LIB -Iinclude -isystem <lely-include> \
         -isystem third_party/spdlog/include "$f" || exit 1
 done
 ```
 
 Host `-fsyntax-only` 只验证语法、模板实例化和工程内部接口，不代表 Yocto/aarch64 完整链接或目标板运行通过。
 
-正式环境仍需执行：
+正式部署构建仍需执行：
 
 ```sh
 rm -rf build
 cmake -S . -B build \
-    -DCMAKE_BUILD_TYPE=Debug \
     -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
 cmake --build build --verbose -j"$(nproc)"
 ```
+
+要求配置输出为 `CANopen master build type: MinSizeRel`，并实际生成
+`build/third_party/spdlog/libspdlog.a`。最终 ELF 不应新增 `libspdlog.so` 运行时依赖。
+
+需要调试符号时另行显式配置 `-DCMAKE_BUILD_TYPE=Debug`。
 
 ## 目标板公共前置
 

@@ -116,7 +116,19 @@ A03/A04 当前直接使用既有 `project.eds`/`master.dcf` 映射和 SYNC 对�
 cp cmake/build_config.local.cmake.example cmake/build_config.local.cmake
 ```
 
-修改 Yocto SDK、sysroot 和 Lely stage 路径后执行：
+修改 Yocto SDK、sysroot 和 Lely stage 路径后，普通构建直接使用默认 `MinSizeRel`：
+
+```sh
+rm -rf build
+cmake -S . -B build \
+    -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+cmake --build build --verbose -j"$(nproc)"
+```
+
+首次构建会同时把 vendored spdlog 1.17.0 编译为
+`build/third_party/spdlog/libspdlog.a`，不需要手工生成或提交预编译 `.a`。
+
+需要源码级调试时显式切换到 `Debug`：
 
 ```sh
 rm -rf build

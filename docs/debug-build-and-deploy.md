@@ -58,6 +58,8 @@ CAN 接口和 Node-ID 修改 `include/canopen_config.h`。
 
 ## 4. 构建主程序
 
+工程普通构建默认是 `MinSizeRel`；本节远程调试流程必须显式指定 `Debug`。
+
 ```sh
 rm -rf build
 cmake -S . -B build \

@@ -19,7 +19,7 @@ include("${CANOPEN_LOCAL_BUILD_CONFIG}")
 
 set(CANOPEN_TARGET_SYSTEM_NAME "Linux" CACHE STRING "Target operating system" FORCE)
 set(CANOPEN_TARGET_PROCESSOR "aarch64" CACHE STRING "Target processor architecture" FORCE)
-set(CANOPEN_DEFAULT_BUILD_TYPE "Debug" CACHE STRING "Default build type")
+set(CANOPEN_DEFAULT_BUILD_TYPE "MinSizeRel" CACHE STRING "Default build type")
 
 if(NOT DEFINED CACHED_IP_ADDR)
     set(CACHED_IP_ADDR "$ENV{CANOPEN_TARGET_IP}" CACHE STRING "Target board address for deployment")

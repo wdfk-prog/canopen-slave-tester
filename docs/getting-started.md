@@ -38,17 +38,19 @@ cd config
 cd ..
 ```
 
-## 4. 构建 Debug
+## 4. 构建默认 MinSizeRel
+
+普通构建不需要显式传 `CMAKE_BUILD_TYPE`，工程默认使用 `MinSizeRel`：
 
 ```sh
 rm -rf build
 cmake -S . -B build \
-    -DCMAKE_BUILD_TYPE=Debug \
     -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
 cmake --build build --verbose -j"$(nproc)"
 ```
 
-Debug 最终参数应包含 `-O0 -g3`。`-g0` 会关闭调试信息。
+CMake 配置输出应包含 `CANopen master build type: MinSizeRel`。首次构建还会自动生成
+`build/third_party/spdlog/libspdlog.a`，Host 最终静态链接该库。
 
 ## 5. 部署运行
 
@@ -60,11 +62,18 @@ cmake --build build --target download
 
 ## 6. 启动远程调试
 
+`debug-deploy` 仍要求显式 `Debug` 构建。切换到调试配置后再部署：
+
 ```sh
+rm -rf build
+cmake -S . -B build \
+    -DCMAKE_BUILD_TYPE=Debug \
+    -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+cmake --build build --verbose -j"$(nproc)"
 cmake --build build --target debug-deploy
 ```
 
-兼容目标：
+Debug 最终参数应包含 `-O0 -g3`。`-g0` 会关闭调试信息。兼容目标：
 
 ```sh
 cmake --build build --target debug
