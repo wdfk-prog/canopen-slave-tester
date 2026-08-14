@@ -1,6 +1,6 @@
-# CANopen Master 自动协议测试
+# CANopen Host 自动协议测试
 
-本工程基于 Lely CANopen，面向 TQ8MP Linux/aarch64 主站与 RT-Thread + CANopenNode MCU 从机。当前自动流程按顺序执行 A01 Heartbeat、A02 SDO、A03 RPDO/TPDO、A04 SYNC/同步 TPDO、A05 TIME 和 A06 EMCY；任一流程失败后停止执行后续自动流程。测试结束后程序继续运行，直到收到 `Ctrl+C`/`SIGTERM`，再执行 Final Reset Communication 并退出。
+本工程基于 Lely CANopen，面向 TQ8MP Linux/aarch64 与 RT-Thread + CANopenNode MCU。Host 角色直接由 `include/canopen_config.h` 中的 `CANOPEN_ROLE` 宏选择；当前默认 `CANOPEN_ROLE_SLAVE` 启动 Lely `BasicSlave` Node 2，用于 NMT Master HIL，改为 `CANOPEN_ROLE_MASTER` 后，Node 127 主站测试器按顺序执行 A01 Heartbeat、A02 SDO、A03 RPDO/TPDO、A04 SYNC/同步 TPDO 和 A06 EMCY；A05 TIME 主机侧代码保留但默认关闭。两种角色仍共用同一 `canopen_master` target 和全部 `src/*.cpp`。角色选择与 NMT 测试流程见 [`docs/CANopen_NMT_Master_Test.md`](docs/CANopen_NMT_Master_Test.md)。
 
 ## 自动测试链路
 
@@ -38,8 +38,6 @@ Startup Boot
    → Lely 主站周期发送 5 个 SYNC，验证每个 SYNC 对应 1 个 TPDO1
    → 停止 SYNC，恢复并回读 TPDO1 原参数
    → 无 SYNC 下验证恢复后的事件型 TPDO1 周期
-→ A05 TIME
-   → 通过 0x2300 诊断对象验证 TIME consumer
 → A06 EMCY
    → 共享 OnEmcy 事件流验证 0x8130/0x0000、0x1001 和 0x1003
    → 0x1014 与主站本地 0x1028:01 按 disable/change/enable 联动切换到 0x681
@@ -51,7 +49,7 @@ Startup Boot
 
 A03 不使用外部 `cansend`，PDO 收发由 Lely `OnRpdo()`、`OnTpdo()`、`RpdoMapped()` 和 `TpdoMapped()` 完成。A04 同样不构造原始 CAN 帧，SYNC 由 Lely 本地 `0x1006` producer 定时器产生，并通过 `OnSync()` 与 `OnRpdo()` 建立同步时序证据。当前 EDS/DCF 已包含 A03/A04 所需的默认 PDO 和 SYNC 配置，不需要为该测试重新生成配置。
 
-A05 TIME Consumer 当前已进入自动流程；MCU 测试固件必须提供只读诊断记录 `0x2300:01..03`：合法 DLC=6 TIME 接收计数、`CO_TIME_t::ms` 和 `CO_TIME_t::days`。A05 通过现有 Lely CAN network 发送精确 TIME 测试帧，不创建额外 SocketCAN raw socket。
+A05 TIME Consumer 主机侧实现保留，但当前 `CANOPEN_ENABLE_TIME_PROCESS=0`。MCU 测试固件提供只读诊断记录 `0x2300:01..03` 后，可直接把该宏改为 `1` 重新纳入 Master 自动流程。
 
 ## 流程私有配置
 
@@ -79,6 +77,7 @@ include/sync_pdo_process.h         A04 接口
 include/time_process.h             A05 TIME consumer 接口
 include/canopen_emcy.h              共享 EMCY event observer
 include/emcy_process.h              A06 EMCY producer 接口
+include/nmt_master_process.h        NMT Master 行为验证接口（Slave role）
 src/canopen_emcy.cpp                唯一 OnEmcy callback、序列化缓存与时间戳
 src/nmt_heartbeat.cpp              Boot、Heartbeat 和 A01
 src/sdo_process.cpp                A02 用户 OD SDO 验证
@@ -86,7 +85,8 @@ src/pdo_process.cpp                A03 RPDO/TPDO 验证
 src/sync_pdo_process.cpp           A04 SYNC consumer/同步 TPDO 验证
 src/time_process.cpp               A05 TIME consumer 主机侧验证
 src/emcy_process.cpp               A06 EMCY/0x1001/0x1003/0x1014/0x1015 验证
-src/main.cpp                       Lely 生命周期和自动流程注册
+src/nmt_master_process.cpp         Lely BasicSlave NMT callback 顺序验证
+src/main.cpp                       公共 Lely 生命周期、Master/Slave 角色入口
 src/shutdown_process.cpp           Final Reset Communication
 ```
 
@@ -134,7 +134,7 @@ Debug 构建保留 `-O0 -g3 -fno-omit-frame-pointer -fno-optimize-sibling-calls`
 cmake --build build --target download
 ```
 
-`deploy/run.sh` 会把可执行文件、`master.dcf`、`project.eds` 和 `mcu_node_1.bin` 上传到暂存文件，备份现有文件，再在目标目录内逐文件原子替换。
+`deploy/run.sh` 会把可执行文件、`master.dcf`、`project.eds` 和 `mcu_node_1.bin` 上传到暂存文件，备份现有文件，再在目标目录内逐文件原子替换。Master/Slave 两种角色继续共用同一部署流程；Slave role 直接复用 MCU 提供的 `project.eds`，不修改其中的 NMT startup，也不需要额外 concise DCF。完成 Reset 并注册 NMT observer 后才把 Node 2 的 `0x1017` 配成 500 ms Heartbeat；如果 peer 当前不是 PRE-OP，MCU 会先发送额外 PREOP 做测试夹具归一化。Reset 完成后 Host 在内部 PRE-OP callback 处恢复 Heartbeat，MCU 再按需要归一化到 PRE-OP 后继续正式序列。
 
 默认目标布局：
 

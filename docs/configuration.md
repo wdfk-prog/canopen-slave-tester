@@ -114,17 +114,32 @@ NrOfEntries=1
 
 `include/canopen_config.h` 只保存被多个模块或主运行时共同使用的全局配置。协议专属配置和单个流程的开关必须放在对应模块头文件，避免公共配置头持续膨胀。
 
+Host 角色直接通过 `include/canopen_config.h` 中的一个编译期宏选择，不增加第二个 target，也不改变源码集合：
+
+```c
+#define CANOPEN_ROLE CANOPEN_ROLE_SLAVE  /* NMT Master HIL */
+/* 或 */
+#define CANOPEN_ROLE CANOPEN_ROLE_MASTER /* A01-A06 */
+```
+
+修改 `CANOPEN_ROLE` 后按原有 CMake 构建流程重新编译即可；CMake 不负责角色选择。Master/Slave 业务实现分支仍只保留在 `main()` 最终入口，配置头继续拒绝非法角色值。详细流程见 [CANopenNode NMT Master 测试设计](CANopen_NMT_Master_Test.md)。
+
 全局配置：
 
 | 宏 | 默认值 | 说明 |
 | --- | ---: | --- |
+| `CANOPEN_ROLE` | `CANOPEN_ROLE_SLAVE` | 直接在 `include/canopen_config.h` 修改；`SLAVE` 用于 NMT HIL，`MASTER` 用于 A01-A06 |
 | `CANOPEN_INTERFACE_NAME` | `"can1"` | SocketCAN 接口 |
 | `CANOPEN_EXPECTED_BITRATE` | `1000000` | 期望 bitrate，bit/s |
 | `CANOPEN_MASTER_NODE_ID` | `127` | 主站 Node-ID |
-| `CANOPEN_SLAVE_NODE_ID` | `1` | 被测从机 Node-ID |
+| `CANOPEN_SLAVE_NODE_ID` | `1` | A01-A06 被测从机 Node-ID |
+| `CANOPEN_PEER_NODE_ID` | `2` | NMT Master 测试时的 Lely software slave Node-ID |
+| `CANOPEN_PEER_HEARTBEAT_MS` | `500` | Slave role 在 Reset 后且 observer 注册完成后写入本地 `0x1017` 的 Producer Heartbeat 周期 |
+| `CANOPEN_PEER_EDS_PATH` | `../config/project.eds` | 复用 MCU 提供的 EDS；Host 不修改 NMT startup，fixture 初态由 MCU NMT 命令归一化 |
 | `CANOPEN_MASTER_DCF_PATH` | `../config/master.dcf` | 相对远端 `bin/` 的 DCF 路径 |
 | `CANOPEN_CHANNEL_RX_QUEUE_SIZE` | `256` | SocketCAN receive queue |
 | `CANOPEN_WAIT_TIMEOUT_MS` | `5000` | Startup Boot、A04 异常恢复和 Final Reset 等跨流程等待时间 |
+| `CANOPEN_LOOP_START_TIMEOUT_MS` | `1000` | event-loop worker 启动同步最大等待时间 |
 | `CANOPEN_LOG_QUEUE_SIZE` | `8192` | 异步日志队列容量 |
 | `CANOPEN_LOG_WORKER_COUNT` | `1` | 异步日志 worker 数量 |
 
@@ -139,6 +154,7 @@ NrOfEntries=1
 | `include/pdo_process.h` | `CANOPEN_ENABLE_PDO_PROCESS` | `1` | 注册并执行 A03 RPDO/TPDO |
 | `include/sync_pdo_process.h` | `CANOPEN_ENABLE_SYNC_PDO_PROCESS` | `1` | 注册并执行 A04 SYNC/同步 TPDO |
 | `include/time_process.h` | `CANOPEN_ENABLE_TIME_PROCESS` | `0` | A05 主机侧已实现；MCU `0x2300:01..03` 就绪后再注册 TIME Consumer 测试 |
+| `include/nmt_master_process.h` | `CANOPEN_ENABLE_NMT_MASTER_PROCESS` | `1` | Slave 角色执行 MCU NMT Master 行为验证 |
 | `include/shutdown_process.h` | `CANOPEN_ENABLE_FINAL_RESET_PROCESS` | `1` | 退出时执行 Reset Communication |
 
 测试流程自己的对象索引、probe value、采样数量、周期容差和流程 timeout 不放入公共配置头。当前分别位于：

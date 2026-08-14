@@ -251,3 +251,48 @@ Final Reset Communication completed
 | 20 | A06 cleanup | 0x1014/0x1015/0x1028/0x1017 全部恢复并回读，原 COB-ID smoke test 通过 |
 | 21 | 正常退出 | Final Reset Communication 完成 |
 | 22 | 完整验证 | 交叉构建、目标抓包和本地多轮复审均有实际证据 |
+
+## NMT Master / Slave 角色验收
+
+角色静态检查：
+
+```sh
+grep -R "CANOPEN_ROLE" src include
+grep -n "g_canopen_processes\|nmtMasterProcess" src/main.cpp
+```
+
+要求：
+
+1. `CANOPEN_ROLE` 只在 `include/canopen_config.h` 直接选择 Master/Slave；
+2. Master/Slave 业务实现分支只在 `src/main.cpp` 的最终入口；`canopen_config.h` 保留角色值、选择值和合法性检查；
+3. Master `g_canopen_processes` 只包含 A01～A06；
+4. `nmtMasterProcess()` 只由 Slave role 调用；
+5. 分别把 `CANOPEN_ROLE` 设为 `CANOPEN_ROLE_MASTER`/`CANOPEN_ROLE_SLAVE` 后，全部 `src/*.cpp` 都能通过 C++14 语法检查。
+
+Slave 实机流程：
+
+```text
+BasicSlave Node 2 Reset/Boot with MCU-provided project.eds unchanged
+-> register OnCommand observer
+-> configure 0x1017=500 ms and publish validation ready
+-> MCU Heartbeat Consumer reports Node 2 ACTIVE
+-> if needed, MCU sends fixture PREOP and Host consumes the preparation callback
+-> wait formal MCU START / STOP / ENTER_PREOP
+-> wait MCU RESET_COMM
+-> verify internal ENTER_PREOP, then reapply 0x1017=500 ms
+-> read local 0x1F80 startup contract without modifying EDS
+-> if startup bit 2 is 0, require fixture START + MCU PREOP normalization before RESET_NODE
+-> otherwise accept MCU RESET_NODE directly from PRE-OP
+-> wait internal RESET_COMM + ENTER_PREOP and reapply 0x1017 after reset completion
+-> if startup bit 2 is 0, require fixture START + MCU PREOP normalization + a distinct formal final START
+-> otherwise require the formal MCU final START directly
+-> keep Node 2 Operational through two 500 ms heartbeat periods with no further NMT callback
+```
+
+六条正式 MCU 命令及 reset 内部 `RESET_COMM -> ENTER_PREOP` 必须严格按顺序出现。Host 根据未修改 EDS 中的 `0x1F80` startup bit 2（对象缺失按 Lely 缺省值 0）预先确定 fixture `START -> ENTER_PREOP` 是否必须出现，而不是使用静默等待推断。任一必需 callback 超时、fixture 分支缺失/顺序错误或出现其他命令立即 FAIL。
+
+负向回归必须覆盖：当 startup 要求 auto-start 时，在 `RESET_NODE -> fixture START` 后停止 DUT 的 PREOP normalization，Host 必须等待 `Fixture PRE-OP normalization` 超时并返回 FAIL；不得把该 fixture START 当成 formal final START。
+
+Reset 流程允许多个 callback 在 waiter 再次调度前连续到达；实现必须通过 FIFO 保留顺序，不能用单个 latest-command 状态覆盖中间事件。
+
+此验收依赖 MCU 侧启用自动 NMT Master demo、Heartbeat Consumer 和 query functions。Host Slave 不通过 SDO/Raw CAN 触发 MCU，也不修改 MCU 提供的 `project.eds`；Host 只提供 500 ms Producer Heartbeat。MCU 发现 Node 2 后先按需归一化到 PRE-OP，再执行正式六步命令序列。

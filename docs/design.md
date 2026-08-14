@@ -4,7 +4,9 @@
 
 当前自动流程直接复用单个 `lely::canopen::AsyncMaster`，不创建 `BasicDriver`、`SlaveSession` 或重复协议 Service。`main.cpp` 只负责 Lely/SocketCAN 生命周期、Startup Boot、流程注册和退出；A01/A02/A03/A04/A05/A06 各自持有测试私有参数和断言逻辑；EMCY 因 Lely 只有一个 `OnEmcy()` callback 槽，由共享 observer 统一接收。
 
-当前顺序：
+Host 现在支持两个编译角色，但共享同一 CMake、同一 `src/*.cpp` 和同一 Lely/SocketCAN 初始化。角色只由 `include/canopen_config.h` 的 `CANOPEN_ROLE` 选择：Master 角色继续执行 A01～A06；Slave 角色使用 Lely `BasicSlave` Node 2 验证 MCU NMT Master。NMT Master 测试不注册到 Master 的 `g_canopen_processes`。详细设计见 [CANopenNode NMT Master 测试设计](CANopen_NMT_Master_Test.md)。
+
+当前 Master 顺序：
 
 ```text
 Startup Boot

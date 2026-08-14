@@ -19,7 +19,7 @@ build/canopen_master.map
 
 | target | 行为 |
 | --- | --- |
-| `download` | 上传可执行文件、`master.dcf`、`project.eds` 并直接运行 |
+| `download` | 上传可执行文件和完整 CANopen runtime 配置并直接运行 |
 | `debug-deploy` | 要求 Debug 构建，上传 `.elf` 并启动 gdbserver |
 | `debug` | 兼容别名，依赖 `debug-deploy` |
 
@@ -37,10 +37,13 @@ cmake --build build --target debug-deploy
 │   └── canopen_master.elf
 └── config/
     ├── master.dcf
-    └── project.eds
+    ├── project.eds
+    └── mcu_node_1.bin
 ```
 
 `CANOPEN_MASTER_DCF_PATH` 默认为 `../config/master.dcf`，因此部署脚本必须从远端 `bin/` 目录启动程序。
+
+Slave role 直接复用 `project.eds` 创建 `BasicSlave` Node 2，不加载额外 concise DCF；Master/Slave 两种角色继续共用同一个 `download`/`debug-deploy` 流程。
 
 ## 直接使用脚本
 
@@ -58,6 +61,7 @@ cmake --build build --target debug-deploy
 - `CANOPEN_TARGET_CONFIG_PATH`
 - `CANOPEN_MASTER_DCF_PATH`
 - `CANOPEN_PROJECT_EDS_PATH`
+- `CANOPEN_MCU_NODE_DCF_PATH`
 - `CANOPEN_GDB_PORT`
 
 脚本不再上传运行时 INI 文件，也不会给程序传入参数。

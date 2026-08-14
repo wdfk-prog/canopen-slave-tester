@@ -1,6 +1,6 @@
 /**
  * @file
- * @brief Implements CANopen master initialization and process orchestration.
+ * @brief Implements the selectable CANopen master-tester and slave-peer entry.
  */
 
 #include "canopen_config.h"
@@ -9,13 +9,15 @@
 #include "canopen_process.h"
 #include "emcy_process.h"
 #include "nmt_heartbeat.h"
+#include "nmt_master_process.h"
 #include "pdo_process.h"
 #include "sdo_process.h"
+#include "shutdown_process.h"
 #include "sync_pdo_process.h"
 #include "time_process.h"
-#include "shutdown_process.h"
 
 #include <lely/coapp/master.hpp>
+#include <lely/coapp/slave.hpp>
 #include <lely/ev/exec.hpp>
 #include <lely/ev/loop.hpp>
 #include <lely/io2/ctx.hpp>
@@ -31,16 +33,19 @@
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <csignal>
 #include <cstddef>
 #include <cstdint>
 #include <ctime>
 #include <memory>
+#include <mutex>
 #include <system_error>
 #include <thread>
 
 namespace {
-/** Ordered automatic test process table assembled from build-time switches. */
+
+/** Ordered master-side automatic test process table. */
 const std::array<CanopenProcessEntry,
                  CANOPEN_ENABLE_HEARTBEAT_PROCESS
                      + CANOPEN_ENABLE_SDO_PROCESS
@@ -71,8 +76,14 @@ const std::array<CanopenProcessEntry,
 
 /** Signal-safe shutdown request flag; zero means no termination signal yet. */
 volatile std::sig_atomic_t g_stop_requested = 0;
-/** Event-loop liveness flag shared between the worker and control thread. */
+/** Event-loop liveness flag read by the role control thread. */
 std::atomic<bool> g_canopen_loop_running(false);
+/** Protects the event-loop startup publication. */
+std::mutex g_canopen_loop_mutex;
+/** Wakes the control thread when the worker has entered its run path. */
+std::condition_variable g_canopen_loop_condition;
+/** true after the current event-loop worker publishes startup. */
+bool g_canopen_loop_started = false;
 
 /**
  * @brief Request orderly shutdown from a POSIX signal handler.
@@ -104,6 +115,21 @@ void initializeLogging()
 }
 
 /**
+ * @brief Install the signal-safe shutdown handlers shared by both roles.
+ *
+ * @return true when both handlers are installed; otherwise false.
+ */
+bool installSignalHandlers()
+{
+    if (std::signal(SIGINT, signalHandler) == SIG_ERR
+        || std::signal(SIGTERM, signalHandler) == SIG_ERR) {
+        spdlog::error("Unable to install process signal handlers");
+        return false;
+    }
+    return true;
+}
+
+/**
  * @brief Log CAN controller state transitions.
  */
 void canStateCallback(lely::io::CanState new_state,
@@ -127,8 +153,14 @@ void canErrorCallback(lely::io::CanError error) noexcept
  */
 void canopenWorker(lely::ev::Loop& loop) noexcept
 {
-    /* Publish liveness before entering the blocking event-loop run call. */
-    g_canopen_loop_running.store(true, std::memory_order_release);
+    {
+        /* Publish startup while holding the mutex used by the blocking waiter;
+         * this avoids the polling startup race from the previous peer draft. */
+        std::lock_guard<std::mutex> lock(g_canopen_loop_mutex);
+        g_canopen_loop_started = true;
+        g_canopen_loop_running.store(true, std::memory_order_release);
+    }
+    g_canopen_loop_condition.notify_all();
 
     /* A default-constructed error_code represents success until loop.run()
      * reports an I/O or executor failure. */
@@ -140,43 +172,60 @@ void canopenWorker(lely::ev::Loop& loop) noexcept
     }
 
     g_canopen_loop_running.store(false, std::memory_order_release);
+    g_canopen_loop_condition.notify_all();
 }
 
-} // namespace
-
-int main(void)
+/**
+ * @brief Start the CANopen worker and wait for its startup publication.
+ *
+ * @param loop Lely event loop associated with the active role objects.
+ * @param worker Receives the created worker thread.
+ * @return true when the worker starts within the configured timeout.
+ */
+bool startCanopenWorker(lely::ev::Loop& loop, std::thread& worker)
 {
-    /* Accumulate setup/process/shutdown failures; zero means the whole run is
-     * still considered successful. */
-    int error_count = 0;
-    initializeLogging();
-
-    /* Install only signal-safe handlers; the actual shutdown stays in the
-     * normal control flow below. */
-    if (std::signal(SIGINT, signalHandler) == SIG_ERR
-        || std::signal(SIGTERM, signalHandler) == SIG_ERR) {
-        spdlog::error("Unable to install process signal handlers");
-        return 1;
+    {
+        std::lock_guard<std::mutex> lock(g_canopen_loop_mutex);
+        g_canopen_loop_started = false;
+        g_canopen_loop_running.store(false, std::memory_order_release);
     }
 
-    /* io_guard initializes the Lely I/O subsystem for this process lifetime. */
-    lely::io::IoGuard io_guard;
-    /* context owns cancellable asynchronous I/O resources. */
-    lely::io::Context context;
-    /* poll binds the context to the POSIX polling backend used on Linux. */
-    lely::io::Poll poll(context);
-    /* loop dispatches all Lely CANopen callbacks on one event-loop thread. */
-    lely::ev::Loop loop(poll.get_poll());
-    /* executor is retained because every Lely async object must share the
-     * event-loop execution context. */
-    lely::ev::Executor executor = loop.get_executor();
-    /* CLOCK_MONOTONIC prevents wall-clock adjustments from changing protocol
-     * timer behavior. */
-    lely::io::Timer timer(poll, executor, CLOCK_MONOTONIC);
-    /* controller opens the configured SocketCAN interface by name. */
-    lely::io::CanController controller(CANOPEN_INTERFACE_NAME);
+    worker = std::thread(canopenWorker, std::ref(loop));
 
-    /* error is reused for synchronous Lely setup calls and starts clear. */
+    const std::chrono::milliseconds timeout(CANOPEN_LOOP_START_TIMEOUT_MS);
+    std::unique_lock<std::mutex> lock(g_canopen_loop_mutex);
+    return g_canopen_loop_condition.wait_for(
+        lock, timeout, []() { return g_canopen_loop_started; });
+}
+
+/**
+ * @brief Stop pending Lely I/O and join the event-loop worker.
+ *
+ * Context shutdown is retained intentionally: CanChannel and Timer register
+ * asynchronous I/O services with the Context. Cancelling those services before
+ * join lets loop.run() drain/terminate before the role-owned Lely objects and
+ * their I/O resources leave scope.
+ *
+ * @param context Lely I/O context owning pending services.
+ * @param worker Event-loop worker started by startCanopenWorker().
+ */
+void stopCanopenWorker(lely::io::Context& context, std::thread& worker) noexcept
+{
+    context.shutdown();
+    if (worker.joinable()) {
+        worker.join();
+    }
+}
+
+/**
+ * @brief Verify the configured SocketCAN nominal bitrate.
+ *
+ * @param controller Open Lely SocketCAN controller.
+ * @return true when the current nominal bitrate matches the project setting.
+ */
+bool validateCanBitrate(lely::io::CanController& controller)
+{
+    /* error is reused for the synchronous bitrate query and starts clear. */
     std::error_code error;
     /* Zero initializes output storage before get_bitrate() overwrites it. */
     int nominal_bitrate = 0;
@@ -186,25 +235,33 @@ int main(void)
     controller.get_bitrate(&nominal_bitrate, &data_bitrate, error);
     if (error) {
         spdlog::error("Unable to read CAN bitrate: {}", error.message());
-        return 1;
+        return false;
     }
     if (nominal_bitrate != CANOPEN_EXPECTED_BITRATE) {
         spdlog::error("Unexpected CAN bitrate: expected={} actual={}",
                       CANOPEN_EXPECTED_BITRATE, nominal_bitrate);
-        return 1;
+        return false;
     }
+    return true;
+}
 
-    /* The queue depth is configured to absorb short receive bursts without
-     * changing protocol ordering. */
-    lely::io::CanChannel channel(poll, executor,
-                                 CANOPEN_CHANNEL_RX_QUEUE_SIZE);
-    channel.open(controller, lely::io::CanBusFlag::NONE, error);
-    if (error) {
-        spdlog::error("Unable to open CAN interface {}: {}",
-                      CANOPEN_INTERFACE_NAME, error.message());
-        return 1;
-    }
-
+/**
+ * @brief Run the existing AsyncMaster-based A01-A06 tester role.
+ *
+ * @param context Common Lely I/O context used to stop the worker on exit.
+ * @param loop Common Lely event loop.
+ * @param executor Executor associated with loop.
+ * @param timer CANopen protocol timer dedicated to this role.
+ * @param channel CAN channel dedicated to this role.
+ * @return Zero on success; otherwise a non-zero application result.
+ */
+int runCanopenMaster(lely::io::Context& context, lely::ev::Loop& loop,
+                     lely::ev::Executor executor, lely::io::Timer& timer,
+                     lely::io::CanChannel& channel)
+{
+    /* Accumulate setup/process/shutdown failures; zero means the whole run is
+     * still considered successful. */
+    int error_count = 0;
     /* Remain false until the slave produces an accepted Boot callback after
      * master.Reset(); this gates every automatic process. */
     bool startup_boot_succeeded = false;
@@ -215,15 +272,18 @@ int main(void)
         CANOPEN_MASTER_NODE_ID);
     master.OnCanState(canStateCallback);
     master.OnCanError(canErrorCallback);
-    /* Register the shared remote NMT state observer before Reset can generate
-     * state indications used by later confirmed NMT command waits. */
     registerNmtStateCallback(master);
     registerNmtHeartbeatCallbacks(master);
     registerCanopenEmcyCallback(master);
 
     /* Run the event loop on a dedicated thread so process functions can wait
      * synchronously for callbacks without blocking Lely itself. */
-    std::thread canopen_thread(canopenWorker, std::ref(loop));
+    std::thread canopen_thread;
+    if (!startCanopenWorker(loop, canopen_thread)) {
+        spdlog::error("CANopen event loop did not start in time");
+        stopCanopenWorker(context, canopen_thread);
+        return 1;
+    }
 
     /* Establish a clean Boot wait state before Reset can generate callbacks. */
     prepareBootWait();
@@ -238,8 +298,8 @@ int main(void)
                      CANOPEN_SLAVE_NODE_ID);
     }
 
-    /* Execute enabled automatic processes only after startup Boot proves the
-     * remote node is reachable and managed by the current master instance. */
+    /* Execute only A01-A06 master-side processes. NMT-master validation is a
+     * slave-role responsibility and is intentionally absent from this table. */
     if (startup_boot_succeeded) {
         error_count += canopenRunProcesses(master, g_canopen_processes.data(),
                                            g_canopen_processes.size());
@@ -247,8 +307,7 @@ int main(void)
 
     /* Preserve the existing interactive lifetime: automatic validation ends
      * first, then the process remains available until Ctrl+C or loop failure. */
-    spdlog::info(
-        "Automatic CANopen tests finished; waiting for Ctrl+C");
+    spdlog::info("Automatic CANopen tests finished; waiting for Ctrl+C");
     while (g_stop_requested == 0
            && g_canopen_loop_running.load(std::memory_order_acquire)) {
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
@@ -256,7 +315,8 @@ int main(void)
 
     if (g_stop_requested == 0
         && !g_canopen_loop_running.load(std::memory_order_acquire)) {
-        spdlog::error("CANopen event loop stopped before shutdown was requested");
+        spdlog::error(
+            "CANopen event loop stopped before shutdown was requested");
         ++error_count;
     }
 
@@ -269,13 +329,116 @@ int main(void)
     }
 #endif /* CANOPEN_ENABLE_FINAL_RESET_PROCESS */
 
-    /* Cancel pending I/O before joining the event-loop thread. */
-    context.shutdown();
-    if (canopen_thread.joinable()) {
-        canopen_thread.join();
+    stopCanopenWorker(context, canopen_thread);
+    spdlog::info("CANopen master exiting with result={}", error_count);
+    return error_count == 0 ? 0 : 1;
+}
+
+/**
+ * @brief Run the BasicSlave peer used to validate the MCU NMT-master behavior.
+ *
+ * @param context Common Lely I/O context used to stop the worker on exit.
+ * @param loop Common Lely event loop.
+ * @param executor Executor associated with loop.
+ * @param timer CANopen protocol timer dedicated to this role.
+ * @param channel CAN channel dedicated to this role.
+ * @return Zero on success; otherwise a non-zero application result.
+ */
+int runCanopenSlave(lely::io::Context& context, lely::ev::Loop& loop,
+                    lely::ev::Executor executor, lely::io::Timer& timer,
+                    lely::io::CanChannel& channel)
+{
+    int error_count = 0;
+    /* Reuse the MCU-provided project.eds unchanged and do not load a concise
+     * DCF for the software peer. The validation process normalizes Node 2 with
+     * MCU-issued NMT commands instead of changing EDS startup behavior. */
+    lely::canopen::BasicSlave slave(
+        executor, timer, channel, CANOPEN_PEER_EDS_PATH,
+        "", CANOPEN_PEER_NODE_ID);
+    slave.OnCanState(canStateCallback);
+    slave.OnCanError(canErrorCallback);
+
+    std::thread canopen_thread;
+    if (!startCanopenWorker(loop, canopen_thread)) {
+        spdlog::error("CANopen event loop did not start in time");
+        stopCanopenWorker(context, canopen_thread);
+        return 1;
     }
 
-    spdlog::info("CANopen master exiting with result={}", error_count);
-    spdlog::shutdown();
+    /* BasicSlave::Reset() starts the normal slave boot-up sequence. Lely
+     * exposes no status-returning overload, so this existing throwing API is
+     * called directly rather than adding a local try/catch wrapper. */
+    slave.Reset();
+
+    spdlog::info("CANopen slave peer started: node={}",
+                 CANOPEN_PEER_NODE_ID);
+
+#if CANOPEN_ENABLE_NMT_MASTER_PROCESS
+    /* This role is the controlled node. The DUT must initiate the NMT command
+     * sequence; the peer only observes commands and verifies its own states. */
+    error_count += nmtMasterProcess(slave);
+#else
+    spdlog::info("NMT master validation disabled; waiting for Ctrl+C");
+    while (g_stop_requested == 0
+           && g_canopen_loop_running.load(std::memory_order_acquire)) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+#endif /* CANOPEN_ENABLE_NMT_MASTER_PROCESS */
+
+    if (g_stop_requested == 0
+        && !g_canopen_loop_running.load(std::memory_order_acquire)) {
+        spdlog::error(
+            "CANopen event loop stopped before the slave role completed");
+        ++error_count;
+    }
+
+    stopCanopenWorker(context, canopen_thread);
+    spdlog::info("CANopen slave peer exiting with result={}", error_count);
     return error_count == 0 ? 0 : 1;
+}
+
+} // namespace
+
+int main(void)
+{
+    initializeLogging();
+    if (!installSignalHandlers()) {
+        spdlog::shutdown();
+        return 1;
+    }
+
+    /* Both roles share one Lely/SocketCAN runtime setup. Only the CANopen node
+     * object and test flow differ after this common initialization. */
+    lely::io::IoGuard io_guard;
+    lely::io::Context context;
+    lely::io::Poll poll(context);
+    lely::ev::Loop loop(poll.get_poll());
+    lely::ev::Executor executor = loop.get_executor();
+    lely::io::Timer timer(poll, executor, CLOCK_MONOTONIC);
+    lely::io::CanController controller(CANOPEN_INTERFACE_NAME);
+    if (!validateCanBitrate(controller)) {
+        spdlog::shutdown();
+        return 1;
+    }
+
+    lely::io::CanChannel channel(poll, executor,
+                                 CANOPEN_CHANNEL_RX_QUEUE_SIZE);
+    std::error_code error;
+    channel.open(controller, lely::io::CanBusFlag::NONE, error);
+    if (error) {
+        spdlog::error("Unable to open CAN interface {}: {}",
+                      CANOPEN_INTERFACE_NAME, error.message());
+        spdlog::shutdown();
+        return 1;
+    }
+
+    int result = 1;
+    if (CANOPEN_ROLE == CANOPEN_ROLE_MASTER) {
+        result = runCanopenMaster(context, loop, executor, timer, channel);
+    } else {
+        result = runCanopenSlave(context, loop, executor, timer, channel);
+    }
+
+    spdlog::shutdown();
+    return result;
 }

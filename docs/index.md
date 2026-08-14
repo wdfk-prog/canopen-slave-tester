@@ -7,6 +7,7 @@
 - [快速开始](getting-started.md)：准备本地配置、构建、部署和首次运行。
 - [编译期配置](configuration.md)：`include/canopen_config.h` 与 `config/master.yml`。
 - [架构设计](design.md)：双线程模型、资源生命周期和 callback 边界。
+- [NMT Master 测试](CANopen_NMT_Master_Test.md)：Master/Slave 编译角色、Lely BasicSlave peer 和 NMT 命令验证流程。
 - [重构实施计划](CANopen_Master_Refactor_Plan.md)：当前方案、阶段、验收和风险。
 - [代码接口](api.md)：当前 Process、callback 和退出行为。
 - [构建与部署](deployment.md)：CMake target、目标板目录和脚本变量。

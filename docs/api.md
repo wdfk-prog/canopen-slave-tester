@@ -127,6 +127,19 @@ int emcyProcess(
 
 A06 不写 `0x1016`。它读取从机 `0x1001/0x1003/0x1014/0x1015`，基础 EMCY 阶段先临时把 `0x1015` 置 0 并回读以隔离 inhibit 影响，再以停止主站本地 `0x1017` 作为 EMCY fault source；动态 COB-ID 测试同时切换从机 `0x1014` 和主站本地 `0x1028:01`，且遵守 disable/change/enable 约束。测试值 `0x681` 和 `0x1015=15000` 仅存在于运行期，结束时恢复保存值并回读。
 
+## NMT Master 行为验证（Slave role）
+
+声明位置：`include/nmt_master_process.h`。
+
+```cpp
+int nmtMasterProcess(
+    lely::canopen::BasicSlave& slave);
+```
+
+该流程只在 `CANOPEN_ROLE_SLAVE` 下由 `runCanopenSlave()` 调用，不进入 Master 的 A01～A06 process table。Linux Node 2 通过 `BasicSlave::OnCommand()` 观察 MCU NMT Master 的正式命令、fixture PRE-OP 归一化命令和 Lely reset 内部状态迁移。callback 进入固定 FIFO 后由控制线程使用 `condition_variable` 有界消费，因此 reset completion、fixture auto START 与 MCU PREOP 连续到达时不会被 latest-state 覆盖。
+
+Host 复用 MCU 提供的 `project.eds` 且不修改 NMT startup；Host 只读取本地 `0x1F80` startup bit 2 来确定 reset 后是否必须出现 fixture auto-start。MCU 自动测试通过 Heartbeat Consumer 发现 Node 2，并按该实际 startup 行为发送 PREOP 归一化后执行正式六步 NMT 序列。RESET_NODE 后若 auto-start 必须发生，Host 严格要求 `fixture START -> PREOP normalization -> distinct final START`，不再通过静默窗口猜测 START 来源。Host 不通过 SDO 或 Raw CAN 触发 MCU。最终 formal START callback 后 Host 继续保持 Node 2 Operational 两个 Producer Heartbeat 周期，随后才返回成功。完整序列和验证边界见 [`CANopen_NMT_Master_Test.md`](CANopen_NMT_Master_Test.md)。
+
 ## Final Reset
 
 声明位置：`include/shutdown_process.h`。
