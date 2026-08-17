@@ -119,7 +119,7 @@ Host 角色直接通过 `include/canopen_config.h` 中的一个编译期宏选�
 ```c
 #define CANOPEN_ROLE CANOPEN_ROLE_SLAVE  /* NMT Master HIL */
 /* 或 */
-#define CANOPEN_ROLE CANOPEN_ROLE_MASTER /* A01-A06/B06 */
+#define CANOPEN_ROLE CANOPEN_ROLE_MASTER /* A01-A06/B06/B09G */
 ```
 
 修改 `CANOPEN_ROLE` 后按原有 CMake 构建流程重新编译即可；CMake 不负责角色选择。Master/Slave 业务实现分支仍只保留在 `main()` 最终入口，配置头继续拒绝非法角色值。详细流程见 [CANopenNode NMT Master 测试设计](CANopen_NMT_Master_Test.md)。
@@ -128,11 +128,11 @@ Host 角色直接通过 `include/canopen_config.h` 中的一个编译期宏选�
 
 | 宏 | 默认值 | 说明 |
 | --- | ---: | --- |
-| `CANOPEN_ROLE` | `CANOPEN_ROLE_SLAVE` | 直接在 `include/canopen_config.h` 修改；`SLAVE` 用于 NMT HIL，`MASTER` 用于 A01-A06/B06 |
+| `CANOPEN_ROLE` | `CANOPEN_ROLE_MASTER` | 直接在 `include/canopen_config.h` 修改；`SLAVE` 用于 NMT HIL，`MASTER` 用于 A/B stage |
 | `CANOPEN_INTERFACE_NAME` | `"can1"` | SocketCAN 接口 |
 | `CANOPEN_EXPECTED_BITRATE` | `1000000` | 期望 bitrate，bit/s |
 | `CANOPEN_MASTER_NODE_ID` | `127` | 主站 Node-ID |
-| `CANOPEN_SLAVE_NODE_ID` | `1` | A01-A06/B06 被测从机 Node-ID |
+| `CANOPEN_SLAVE_NODE_ID` | `1` | Master role A/B stage 的被测 MCU Node-ID |
 | `CANOPEN_PEER_NODE_ID` | `2` | NMT Master 测试时的 Lely software slave Node-ID |
 | `CANOPEN_PEER_HEARTBEAT_MS` | `500` | Slave role 在 Reset 后且 observer 注册完成后写入本地 `0x1017` 的 Producer Heartbeat 周期 |
 | `CANOPEN_PEER_EDS_PATH` | `../config/project.eds` | 复用 MCU 提供的 EDS；Host 不修改 NMT startup，fixture 初态由 MCU NMT 命令归一化 |
@@ -149,13 +149,14 @@ Host 角色直接通过 `include/canopen_config.h` 中的一个编译期宏选�
 | --- | --- | ---: | --- |
 | `include/canopen_sdo.h` | `CANOPEN_SDO_TIMEOUT_MS` | `5000` | 公共远端 SDO helper 传给 Lely 的协议级 timeout |
 | `include/canopen_sdo.h` | `CANOPEN_SDO_COMPLETION_MARGIN_MS` | `500` | SDO 协议 timeout 后额外等待 completion callback 的本地余量 |
-| `include/nmt_heartbeat.h` | `CANOPEN_ENABLE_HEARTBEAT_PROCESS` | `1` | 注册并执行 A01 Heartbeat |
-| `include/sdo_process.h` | `CANOPEN_ENABLE_SDO_PROCESS` | `1` | 注册并执行 A02 SDO |
-| `include/pdo_process.h` | `CANOPEN_ENABLE_PDO_PROCESS` | `1` | 注册并执行 A03 RPDO/TPDO |
-| `include/sync_pdo_process.h` | `CANOPEN_ENABLE_SYNC_PDO_PROCESS` | `1` | 注册并执行 A04 SYNC/同步 TPDO |
-| `include/time_process.h` | `CANOPEN_ENABLE_TIME_PROCESS` | `1` | A05 使用 MCU `0x2300:01..03` TIME diagnostic，默认注册到 Master 自动流程 |
+| `include/nmt_heartbeat.h` | `CANOPEN_ENABLE_HEARTBEAT_PROCESS` | `0` | 当前不注册 A01 Heartbeat |
+| `include/sdo_process.h` | `CANOPEN_ENABLE_SDO_PROCESS` | `0` | 当前不注册 A02 SDO |
+| `include/pdo_process.h` | `CANOPEN_ENABLE_PDO_PROCESS` | `0` | 当前不注册 A03 RPDO/TPDO |
+| `include/sync_pdo_process.h` | `CANOPEN_ENABLE_SYNC_PDO_PROCESS` | `0` | 当前不注册 A04 SYNC/同步 TPDO |
+| `include/time_process.h` | `CANOPEN_ENABLE_TIME_PROCESS` | `0` | 当前不注册 A05 TIME；实现仍保留 |
 | `include/emcy_process.h` | `CANOPEN_ENABLE_EMCY_PROCESS` | `1` | 注册并执行 A06 EMCY Producer 测试 |
 | `include/emcy_consumer_process.h` | `CANOPEN_ENABLE_EMCY_CONSUMER_PROCESS` | `1` | 注册并执行 B06 MCU EMCY Consumer 测试 |
+| `include/gfc_process.h` | `CANOPEN_ENABLE_GFC_PROCESS` | `1` | 注册并执行 J03/B09G GFC consumer/producer 测试 |
 | `include/nmt_master_process.h` | `CANOPEN_ENABLE_NMT_MASTER_PROCESS` | `1` | Slave 角色执行 MCU NMT Master 行为验证 |
 | `include/shutdown_process.h` | `CANOPEN_ENABLE_FINAL_RESET_PROCESS` | `1` | 退出时执行 Reset Communication |
 
@@ -169,9 +170,10 @@ A04  src/sync_pdo_process.cpp
 A05  src/time_process.cpp
 A06  src/emcy_process.cpp
 B06  src/emcy_consumer_process.cpp
+B09G src/gfc_process.cpp
 ```
 
-A01 当前使用 `kHeartbeatIndex=0x1017`、`kHeartbeatTimeoutMs=3000`、`kHeartbeatSampleCount=5` 和 500 ms Producer Heartbeat 周期。A02 使用 `kTestObjectIndex=0x2200`、`kProbeValue=0x12345678`，并在 probe 与原值相同时选择备用值。A03 的 PDO number、`0x2100/0x2101/0x2200`、采样策略和时序容差全部保存在 `pdo_process.cpp`；A04 的 SYNC 周期、样本数量、TPDO1 参数索引和时序窗口保存在 `sync_pdo_process.cpp`；A05 的 `0x1012/0x2300`、TIME 边界值、诊断轮询和时序容差保存在 `time_process.cpp`；B06 的 `0x2301`、EMCY vectors、500 ms SDO timeout、2 s 观察窗口和 snapshot 重试次数都保存在 `emcy_consumer_process.cpp`。
+A01 当前使用 `kHeartbeatIndex=0x1017`、`kHeartbeatTimeoutMs=3000`、`kHeartbeatSampleCount=5` 和 500 ms Producer Heartbeat 周期。A02 使用 `kTestObjectIndex=0x2200`、`kProbeValue=0x12345678`，并在 probe 与原值相同时选择备用值。A03 的 PDO number、`0x2100/0x2101/0x2200`、采样策略和时序容差全部保存在 `pdo_process.cpp`；A04 的 SYNC 周期、样本数量、TPDO1 参数索引和时序窗口保存在 `sync_pdo_process.cpp`；A05 的 `0x1012/0x2300`、TIME 边界值、诊断轮询和时序容差保存在 `time_process.cpp`；B06 的 `0x2301`、EMCY vectors、500 ms SDO timeout、2 s 观察窗口和 snapshot 重试次数都保存在 `emcy_consumer_process.cpp`。B09G 的 `0x1300/0x2302`、固定 CAN-ID `0x001`、负向观察窗口和 wire timeout 都保存在 `gfc_process.cpp`。
 
 从机的基线 Heartbeat 和 PDO 参数仍由 YAML、EDS、`dcfgen` 和 Lely Boot 管理。修改真实通信参数时必须同步修改配置源并重新生成 DCF；源码中的流程私有常量只定义测试行为。B06 不修改 Host/MCU EMCY COB-ID 或 inhibit 参数；Host `0x1014` 必须保持标准 Node 127 EMCY CAN-ID `0x0FF` 且 `0x1015=0`，MCU 固件必须提供只读 `0x2301` diagnostic。
 
@@ -187,6 +189,7 @@ A04 SYNC PDO
 A05 TIME  (按对应宏决定是否注册)
 A06 EMCY
 B06 EMCY Consumer
+B09G GFC
 ```
 
 各 `CANOPEN_ENABLE_*_PROCESS` 宏位于对应流程头文件；值为 `1` 时进入注册表，为 `0` 时不注册。流程采用 fail-fast：任一流程返回非零后，后续流程不再执行。

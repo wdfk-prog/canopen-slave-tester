@@ -9,6 +9,7 @@
 - [架构设计](design.md)：双线程模型、资源生命周期和 callback 边界。
 - [NMT Master 测试](CANopen_NMT_Master_Test.md)：Master/Slave 编译角色、Lely BasicSlave peer 和 NMT 命令验证流程。
 - [B06 EMCY Consumer 测试](CANopen_EMCY_Consumer_Test.md)：Host EMCY producer、MCU `0x2301` diagnostic 与 Reset Communication callback 重绑。
+- [J03/B09G GFC 测试](CANopen_GFC_Test.md)：独立 Lely wire fixture、MCU `0x1300/0x2302` 与 GFC consumer/producer。
 - [重构实施计划](CANopen_Master_Refactor_Plan.md)：当前方案、阶段、验收和风险。
 - [代码接口](api.md)：当前 Process、callback 和退出行为。
 - [构建与部署](deployment.md)：CMake target、目标板目录和脚本变量。

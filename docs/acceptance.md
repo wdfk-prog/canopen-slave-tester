@@ -1,4 +1,4 @@
-# A01-A06/B06 自动测试验收
+# A01-A06/B06/B09G 自动测试验收
 
 ## 本地静态验收
 
@@ -251,6 +251,23 @@ Final Reset Communication completed
 
 辅助 `candump` 应能观察 `0x0FF` 的非零 error EMCY 与 `0x0000` recovery；B06 自动 PASS 以 MCU `0x2301` SDO snapshot 和 Boot/NMT evidence 为准。完整目标板 HIL 还需结合现有全局 CAN state 日志和 CAN 抓包确认测试期间未进入 passive/bus-off，该项不由 `emcyConsumerProcess()` 的自动返回码判定。
 
+## J03 / B09G GFC
+
+前置：MCU 启用 GFC consumer/producer 与 demo GFC diagnostic，提供 `0x1300:00` 和 `0x2302:01..05`。Host Master role 在现有 AsyncMaster channel 之外打开同一个 `can1` 的独立 Lely CanChannel；该 channel 只用于固定 `0x001` 注入/捕获，不是第二个 CANopen 节点。
+
+通过条件：
+
+1. `0x1300=1` 时 `0x001/DLC0` 使 `rx_count` 精确 `+1` 且 `safe_requested=1`；
+2. `0x1300=0` 时相同帧不增加 count；`0x1300=2` 必须返回 `PARAM_VAL (0x06090030)` 且值保持 0；
+3. `0x001/DLC1` 不产生合法 GFC callback；
+4. producer valid=0 时 request 正常完成、`producer_result=0` 且 wire 上没有 `0x001`；
+5. producer valid=1 时 request 完成、`producer_result=0`，wire 必须捕获标准 CAN-ID `0x001`、flags 0、DLC0；
+6. 连续 3 个合法 GFC 必须逐次精确 `+1`；
+7. RESET_COMM + fresh Boot 后 `rx_count` 保持不变、无 pending producer request，fresh GFC 再 `+1`；
+8. `0x1000:00` SDO health 成功；退出 B09G 前确认 producer request/complete 无 pending，恢复测试前 `0x1300` 并回读。
+
+`gfcProcess()` 的 B09G-07 只做上述 SDO smoke；J03 完整验收还必须在 B09G 后按当前选定的 A-stage regression profile 重新执行既有 A-stage 测试。未执行该回归时不得声明“GFC 不影响普通 A-stage”已验证。完整目标板 HIL 还需结合 CAN state 日志和独立抓包确认没有 passive/bus-off。本阶段只声明 GFC protocol functional verification，不声明 SIL、PL 或安全认证。
+
 ## 验收矩阵
 
 | 编号 | 项目 | 通过判据 |
@@ -280,8 +297,13 @@ Final Reset Communication completed
 | 23 | B06 SDO health | EMCY callback 后 `0x1000:00` upload 成功 |
 | 24 | B06 reset rebind | RESET_COMM + fresh Boot 后，0x2301 count/last snapshot 保持不变，再收到一次 vector B 与 recovery |
 | 25 | B06 cleanup | Host local EMCY stack 清理；Reset 后 MCU 恢复 Operational |
-| 26 | 正常退出 | Final Reset Communication 完成 |
-| 27 | 完整验证 | 交叉构建、目标抓包和本地多轮复审均有实际证据 |
+| 26 | B09G consumer gates | valid=1 精确 +1；valid=0、DLC1 不增加；`0x1300=2` 返回 `PARAM_VAL (0x06090030)` 且不改值 |
+| 27 | B09G producer wire | valid=0 无 `0x001`；valid=1 捕获标准 `0x001/DLC0` 且 result=0 |
+| 28 | B09G continuous/reset | 连续 3 帧逐次 +1；RESET_COMM 后 count 保持且 fresh GFC +1 |
+| 29 | B09G cleanup/health | `0x1000` SDO 成功，producer 无 pending，原 `0x1300` 恢复并回读，MCU Operational |
+| 30 | J03 A-stage regression | B09G 后重新执行当前选定的既有 A-stage regression profile 并通过 |
+| 31 | 正常退出 | Final Reset Communication 完成 |
+| 32 | 完整验证 | 交叉构建、目标抓包和本地多轮复审均有实际证据 |
 
 ## NMT Master / Slave 角色验收
 
@@ -296,7 +318,7 @@ grep -n "makeCanopenProcesses\|canopenRunProcesses\|nmtMasterProcess" src/main.c
 
 1. `CANOPEN_ROLE` 只在 `include/canopen_config.h` 直接选择 Master/Slave；
 2. Master/Slave 业务实现分支只在 `src/main.cpp` 的最终入口；`canopen_config.h` 保留角色值、选择值和合法性检查；
-3. Master process table 统一包含 A01～A06/B06，并由 `canopenRunProcesses()` fail-fast 执行；
+3. Master process table 只包含当前启用的 A/B stage，并由 `canopenRunProcesses()` fail-fast 执行；B09G 启用时固定追加在 B06 后；
 4. `nmtMasterProcess()` 只由 Slave role 调用；
 5. 分别把 `CANOPEN_ROLE` 设为 `CANOPEN_ROLE_MASTER`/`CANOPEN_ROLE_SLAVE` 后，全部 `src/*.cpp` 都能通过 C++14 语法检查。
 

@@ -88,7 +88,7 @@ A03 使用 Lely 原生 PDO 能力：
 
 A03 的 PDO number、OD index/subindex、probe value、采样数、周期容差和超时均位于 `src/pdo_process.cpp` 的匿名命名空间中。
 
-## A05 TIME Consumer（默认启用）
+## A05 TIME Consumer（当前默认关闭）
 
 声明位置：`include/time_process.h`。
 
@@ -97,7 +97,7 @@ int timeProcess(
     lely::canopen::AsyncMaster& master);
 ```
 
-A05 使用公共远端 SDO helper 保存、修改和恢复从机 `0x1012:00`，并通过 Lely 内部 CAN network 发送可控 TIME 帧。MCU 必须提供只读诊断记录 `0x2300:01..03`，分别表示合法 DLC=6 TIME 接收计数、应用层 `CO_TIME_t::ms` 和 `CO_TIME_t::days`。主机通过接收计数确认帧到达，通过 `ms/days` 独立确认 TIME 是否真正被应用。当前 `CANOPEN_ENABLE_TIME_PROCESS=1`，MCU `0x2300:01..03` diagnostic 已作为自动断言契约。
+A05 使用公共远端 SDO helper 保存、修改和恢复从机 `0x1012:00`，并通过 Lely 内部 CAN network 发送可控 TIME 帧。MCU 必须提供只读诊断记录 `0x2300:01..03`，分别表示合法 DLC=6 TIME 接收计数、应用层 `CO_TIME_t::ms` 和 `CO_TIME_t::days`。主机通过接收计数确认帧到达，通过 `ms/days` 独立确认 TIME 是否真正被应用。当前 `CANOPEN_ENABLE_TIME_PROCESS=0`，因此 A05 不注册到默认 Master 流程；启用后 MCU `0x2300:01..03` diagnostic 作为自动断言契约。
 
 禁用 consumer 时，CANopenNode 动态 `0x1012` 写入只改变 `isConsumer`，不会注销已经建立的 RX buffer；因此 A05 允许合法 TIME 接收计数继续增加，但要求 `ms/days` 只按已有时间自然推进，不能跳到测试时间戳。若测试从初始 consumer-disabled 状态启用 bit31，A05 会执行一次 Reset Communication，使 CANopenNode 按新 `0x1012` 重新建立 TIME RX buffer。
 
@@ -145,13 +145,29 @@ B06 不使用 Host 共享 `OnEmcy()` observer。Host Node 127 通过 `EmcyTestMa
 
 `pushLocalEmcy()` 在 master 锁内调用现有 COEmcy::push() 并返回结果，只有确认 local EMCY 已入栈后才更新 host_error_active/expected_host_error_count。
 
-Master process table 使用绑定后的 callable，因此 A01～A06 仍接收普通 `AsyncMaster&`，B06 可直接接收 `EmcyTestMaster&`；所有流程仍由同一个 `canopenRunProcesses()` 统一记录 started/passed/failed 并 fail-fast。
+Master process table 使用绑定后的 callable，因此普通流程仍接收 `AsyncMaster&`，B06 可直接接收 `EmcyTestMaster&`；B09G 额外绑定独立 `CanChannel&`。所有流程仍由同一个 `canopenRunProcesses()` 统一记录 started/passed/failed 并 fail-fast。
 
 标准 recovery 不能通过 `AsyncMaster::Error(0)` 产生；`EmcyTestMaster` 是 B06-only access shim，只在 Lely master 锁内暴露现有 local EMCY service 的 `pushLocalEmcy()/peekLocalEmcy()/clearLocalEmcy()`，其中 `clear()` 发送标准 `0x0000` error reset。该扩展不提供任意 CAN frame API。
 
 B06 preflight 要求 Host local EMCY active stack 为空。生成的 compact `0x1003` 在 Lely EMCY service 第一次同步前可能仍保持 DCF 初始值，因此初始 `0x1003:00` 不作为 active stack 深度；但 B06 自己开始产生 EMCY 后，cleanup 前仍通过已经同步的 `0x1003:00`、栈顶和 combined Error Register 共同保护全栈 `clear()`。
 
 B06 在 Reset Communication 前先建立一个非零 vector A persistence marker；Reset 后要求 `remote_rx_count` 与完整非零 EMCY snapshot 全部保持不变，随后 fresh vector B 必须再次精确 `+1`，用于同时证明 diagnostic 持久性和 MCU callback 已重新绑定。fresh Boot callback 的实际 NMT state 同时作为 reset 后状态证据：若已经为 `START`，不重复发送 NMT Start；否则显式 Start 并要求 fresh `OnState(START)`。
+
+## J03 / B09G GFC
+
+声明位置：`include/gfc_process.h`。
+
+```cpp
+int gfcProcess(
+    EmcyTestMaster& master,
+    lely::io::CanChannel& wire_channel);
+```
+
+B09G 不向 `AsyncMaster` 增加伪 GFC service。现有 master channel 继续由 Lely CANopen 协议层独占；`main.cpp` 在 Master role 下另外打开一个同接口的 `CanChannel`，只允许 `gfc_process.cpp` 私有 fixture 发送/捕获 CAN-ID `0x001`。fixture 仅支持合法 DLC0 与负向测试 DLC1，不提供通用任意帧 API。
+
+MCU 通过标准 `0x1300:00` 控制 GFC valid，并用 test-only `0x2302:01..05` 发布 consumer count、安全请求标志以及 producer request/complete/result。Producer 请求由 SDO 写入 sequence，MCU mainline 调用 `CO_GFCsend()`；Host 必须同时等待 completion 并在独立 wire channel 上捕获标准 `0x001/DLC0`。
+
+B09G 保存并恢复测试前 `0x1300`；Reset Communication 后要求 consumer count 保持不变、producer 无 pending request，并通过 fresh GFC 证明 callback 重绑。详细用例见 [`CANopen_GFC_Test.md`](CANopen_GFC_Test.md)。该阶段只声明 GFC protocol functional verification，不声明 SIL/PL/功能安全认证。
 
 ## NMT Master 行为验证（Slave role）
 
@@ -162,7 +178,7 @@ int nmtMasterProcess(
     lely::canopen::BasicSlave& slave);
 ```
 
-该流程只在 `CANOPEN_ROLE_SLAVE` 下由 `runCanopenSlave()` 调用，不进入 Master 的 A01～A06/B06 process table。Linux Node 2 通过 `BasicSlave::OnCommand()` 观察 MCU NMT Master 的正式命令、fixture PRE-OP 归一化命令和 Lely reset 内部状态迁移。callback 进入固定 FIFO 后由控制线程使用 `condition_variable` 有界消费，因此 reset completion、fixture auto START 与 MCU PREOP 连续到达时不会被 latest-state 覆盖。
+该流程只在 `CANOPEN_ROLE_SLAVE` 下由 `runCanopenSlave()` 调用，不进入 Master 的 A/B stage process table。Linux Node 2 通过 `BasicSlave::OnCommand()` 观察 MCU NMT Master 的正式命令、fixture PRE-OP 归一化命令和 Lely reset 内部状态迁移。callback 进入固定 FIFO 后由控制线程使用 `condition_variable` 有界消费，因此 reset completion、fixture auto START 与 MCU PREOP 连续到达时不会被 latest-state 覆盖。
 
 Host 复用 MCU 提供的 `project.eds` 且不修改 NMT startup；Host 只读取本地 `0x1F80` startup bit 2 来确定 reset 后是否必须出现 fixture auto-start。MCU 自动测试通过 Heartbeat Consumer 发现 Node 2，并按该实际 startup 行为发送 PREOP 归一化后执行正式六步 NMT 序列。RESET_NODE 后若 auto-start 必须发生，Host 严格要求 `fixture START -> PREOP normalization -> distinct final START`，不再通过静默窗口猜测 START 来源。Host 不通过 SDO 或 Raw CAN 触发 MCU。最终 formal START callback 后 Host 继续保持 Node 2 Operational 两个 Producer Heartbeat 周期，随后才返回成功。完整序列和验证边界见 [`CANopen_NMT_Master_Test.md`](CANopen_NMT_Master_Test.md)。
 

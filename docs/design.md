@@ -1,12 +1,12 @@
-# A01-A06/B06 自动测试设计
+# CANopen Host 自动测试设计
 
 ## 设计边界
 
-当前自动流程直接复用单个 `lely::canopen::AsyncMaster`，不创建 `BasicDriver`、`SlaveSession` 或重复协议 Service。`main.cpp` 只负责 Lely/SocketCAN 生命周期、Startup Boot、流程注册和退出；A01/A02/A03/A04/A05/A06/B06 各自持有测试私有参数和断言逻辑；A01/A06 接收 EMCY 时因 Lely 只有一个 `OnEmcy()` callback 槽，由共享 observer 统一接收。B06 是反方向的 Host producer -> MCU consumer 验证，不占用 Host `OnEmcy()`。
+主 CANopen 流程复用单个 `EmcyTestMaster`/`AsyncMaster`，不创建第二套 CANopen protocol Service。`main.cpp` 负责 Lely/SocketCAN 生命周期、Startup Boot、流程注册和退出；各 stage 持有测试私有参数和断言逻辑。J03/B09G 是唯一需要 wire-level fixture 的当前 stage：它在同一 `can1` 上创建第二个独立 `CanChannel`，只处理固定 CAN-ID `0x001`，不分配第二个 CANopen Node-ID。
 
-Host 现在支持两个编译角色，但共享同一 CMake、同一 `src/*.cpp` 和同一 Lely/SocketCAN 初始化。角色只由 `include/canopen_config.h` 的 `CANOPEN_ROLE` 选择：Master 角色继续执行 A01～A06/B06；Slave 角色使用 Lely `BasicSlave` Node 2 验证 MCU NMT Master。Master 在 `runCanopenMaster()` 中绑定统一 callable process table；NMT Master 测试不进入该表。详细设计见 [CANopenNode NMT Master 测试设计](CANopen_NMT_Master_Test.md)。
+Host 支持两个编译角色，共享同一 CMake 和 `src/*.cpp`。角色只由 `include/canopen_config.h` 的 `CANOPEN_ROLE` 选择：Master 角色执行当前启用的 A/B stage；Slave 角色使用 Lely `BasicSlave` Node 2 验证 MCU NMT Master。Master 在 `runCanopenMaster()` 中绑定统一 callable process table；B09G 额外绑定 stage-local wire channel，NMT Master 测试不进入该表。详细设计见 [CANopenNode NMT Master 测试设计](CANopen_NMT_Master_Test.md)。
 
-当前 Master 顺序：
+Master stage 的固定注册顺序如下；实际执行项由对应 enable 宏决定：
 
 ```text
 Startup Boot
@@ -17,6 +17,7 @@ Startup Boot
 → A05 TIME
 → A06 EMCY
 → B06 EMCY Consumer
+→ B09G GFC
 → 等待 Ctrl+C/SIGTERM
 → Final Reset Communication
 ```
@@ -31,7 +32,7 @@ src/main.cpp
 ├─ 注册 CAN/Boot/Heartbeat callback 和共享 EMCY observer
 ├─ 启动 Loop::run() 工作线程
 ├─ Reset 并等待 Startup Boot
-├─ canopenRunProcesses(A01, A02, A03, A04, A05, A06, B06)
+├─ canopenRunProcesses(enabled A/B stages, including B09G)
 ├─ 等待退出信号
 ├─ finalResetProcess()
 └─ shutdown Context 并 join 线程
@@ -376,6 +377,16 @@ MCU `remote_rx_count` 与最后一条 EMCY snapshot 设计为跨 communication r
 
 详细用例和 HIL 判据见 [B06 EMCY Consumer 测试](CANopen_EMCY_Consumer_Test.md)。
 
+## J03 / B09G GFC
+
+B09G 保持 CANopen 协议控制和 wire-level 观测分离。`EmcyTestMaster` 继续独占原 master channel，并通过 SDO 访问 MCU `0x1300/0x2302`；`main.cpp` 只在 Master role 且 B09G 启用时，在同一 `CanController` 上打开第二个 `CanChannel(txwait=false)`。`gfc_process.cpp` 的私有 fixture 只发送/捕获 CAN-ID `0x001`，不向其他 stage 暴露通用 Raw CAN API。
+
+Consumer 路径用固定 `0x001/DLC0` 注入并通过 `0x2302.rx_count` 精确计数；valid=0 和 DLC1 使用有界负向窗口证明不产生合法 callback。Producer 路径用 sequence-based `producer_request_seq/producer_complete_seq` 把 `CO_GFCsend()` 保留在 MCU mainline，再以第二 channel 的 timestamped wire capture 证明标准 `0x001/DLC0` 真正出现在总线上。
+
+Reset Communication 后要求 `rx_count` 保留、producer request 不处于 pending，再发送 fresh GFC 证明新 `CO_GFC_t` callback 重绑。cleanup best-effort 恢复 Operational 和测试前 `0x1300`。该 stage 只验证 GFC protocol function；真实安全执行器、SIL/PL、WCET 和认证不在自动 PASS 范围。
+
+详细用例见 [J03/B09G GFC 测试](CANopen_GFC_Test.md)。
+
 ## 退出
 
 收到 `SIGINT` 或 `SIGTERM` 后：
@@ -388,7 +399,7 @@ finalResetProcess(master)
 → join event-loop thread
 ```
 
-由于 `boot:true`，Final Reset 会再次执行节点配置。主站随后退出导致节点 1 检测到主站 Heartbeat 丢失，属于真实离线行为，不计入 A01-A06/B06 自动测试结果。
+由于 `boot:true`，Final Reset 会再次执行节点配置。主站随后退出导致节点 1 检测到主站 Heartbeat 丢失，属于真实离线行为，不计入已完成自动 stage 的结果。
 
 ## 兼容性和影响范围
 
@@ -401,4 +412,5 @@ finalResetProcess(master)
 - 新增 A03 流程开关和 `pdoProcess()` 工程内部接口；
 - 新增 A04 流程开关和 `syncPdoProcess()` 工程内部接口；A04 只临时修改运行期 `0x1800` 和主站本地 `0x1006`，不修改 EDS/DCF；
 - 新增共享 `canopen_emcy` observer 和 A06 `emcyProcess()`；A06 只临时修改 `0x1014/0x1015/0x1028:01/0x1017` 并严格恢复。
-- B06 新增 `emcyConsumerProcess()` 与 `EmcyTestMaster` 的最小 local EMCY test shim；不修改 MCU 通信参数，只读取 `0x2301` diagnostic。
+- B06 新增 `emcyConsumerProcess()` 与 `EmcyTestMaster` 的最小 local EMCY test shim；不修改 MCU 通信参数，只读取 `0x2301` diagnostic；
+- J03/B09G 新增 `gfcProcess()` 与独立 fixed-ID Lely wire channel；只访问 MCU `0x1300/0x2302` 和 CAN-ID `0x001`，不修改 Lely 源码。

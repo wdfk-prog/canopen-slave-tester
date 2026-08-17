@@ -18,14 +18,14 @@ Node-ID 2
 Test peer
 ```
 
-与 A01～A06/B06 不同，本阶段 Linux 端不是 CANopen Master。Linux 程序编译为 Lely `BasicSlave`，作为被 MCU 控制的真实 CANopen 从节点。
+与 A01～A06/B06/B09G 不同，本阶段 Linux 端不是 CANopen Master。Linux 程序编译为 Lely `BasicSlave`，作为被 MCU 控制的真实 CANopen 从节点。
 
 因此代码职责明确分为：
 
 ```text
 CANOPEN_ROLE_MASTER
     -> AsyncMaster
-    -> A01～A06/B06
+    -> A01～A06/B06/B09G
 
 CANOPEN_ROLE_SLAVE
     -> BasicSlave Node 2
@@ -46,7 +46,7 @@ NMT Master 流程不进入 Master 角色的 Process 表。
 
 #define CANOPEN_ROLE CANOPEN_ROLE_SLAVE  /* NMT Master HIL */
 /* 或 */
-#define CANOPEN_ROLE CANOPEN_ROLE_MASTER /* A01～A06/B06 */
+#define CANOPEN_ROLE CANOPEN_ROLE_MASTER /* A01～A06/B06/B09G */
 ```
 
 修改 `CANOPEN_ROLE` 后重新执行原有 CMake 构建即可。CMake 不负责角色选择，不新增第二个 target，也不改变 `src/*.cpp` source list。Master/Slave 业务实现分支仍只在 `main()` 最终入口选择处出现；`canopen_config.h` 继续负责角色值和非法值检查。当前 target 名保持 `canopen_master`，避免改变既有部署、debug target 和脚本接口。
@@ -278,7 +278,7 @@ grep -n "makeCanopenProcesses\|canopenRunProcesses\|nmtMasterProcess" src/main.c
 
 要求：
 
-- Master process table 统一注册 A01～A06/B06，并由 `canopenRunProcesses()` 顺序执行；
+- Master process table 只注册当前 enable 宏开启的 A/B stage，并由 `canopenRunProcesses()` 按固定顺序执行；B09G 启用时排在 B06 后；
 - `nmtMasterProcess()` 仅由 `runCanopenSlave()` 调用。
 
 Slave 目标板验证：
@@ -295,7 +295,7 @@ Slave 目标板验证：
 Master 回归：
 
 1. 将 `include/canopen_config.h` 中的 `CANOPEN_ROLE` 设为 `CANOPEN_ROLE_MASTER`；
-2. A01～A06 的原有注册顺序和行为保持不变，B06 固定追加在 A06 之后；
+2. 已启用 stage 保持固定相对顺序；B06 位于 A06 后，B09G 启用时位于 B06 后；
 3. NMT Master 流程不应出现在 Master 自动测试日志中。
 
 ## 9. 当前未验证边界

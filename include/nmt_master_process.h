@@ -7,7 +7,7 @@
 #define NMT_MASTER_PROCESS_H
 
 /** Enable NMT master behavior validation in the Lely slave role. */
-#define CANOPEN_ENABLE_NMT_MASTER_PROCESS 1
+#define CANOPEN_ENABLE_NMT_MASTER_PROCESS 0
 /** Maximum wait for each expected NMT command transition, in ms. */
 #define CANOPEN_NMT_MASTER_STEP_TIMEOUT_MS 5000
 

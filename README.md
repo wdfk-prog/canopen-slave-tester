@@ -1,6 +1,6 @@
 # CANopen Host 自动协议测试
 
-本工程基于 Lely CANopen，面向 TQ8MP Linux/aarch64 与 RT-Thread + CANopenNode MCU。Host 角色直接由 `include/canopen_config.h` 中的 `CANOPEN_ROLE` 宏选择；当前默认 `CANOPEN_ROLE_SLAVE` 启动 Lely `BasicSlave` Node 2，用于 NMT Master HIL，改为 `CANOPEN_ROLE_MASTER` 后，Node 127 主站测试器按顺序执行 A01 Heartbeat、A02 SDO、A03 RPDO/TPDO、A04 SYNC/同步 TPDO、A05 TIME、A06 EMCY 和 B06 EMCY Consumer。两种角色仍共用同一 `canopen_master` target 和全部 `src/*.cpp`。角色选择与 NMT 测试流程见 [`docs/CANopen_NMT_Master_Test.md`](docs/CANopen_NMT_Master_Test.md)。
+本工程基于 Lely CANopen，面向 TQ8MP Linux/aarch64 与 RT-Thread + CANopenNode MCU。Host 角色直接由 `include/canopen_config.h` 中的 `CANOPEN_ROLE` 宏选择；当前默认 `CANOPEN_ROLE_MASTER`。Master process table 按固定顺序注册各 stage，但只有对应 `CANOPEN_ENABLE_*_PROCESS` 为 `1` 的流程才实际执行；当前默认启用 A06 EMCY、B06 EMCY Consumer 和 J03/B09G GFC。Slave role 使用 Lely `BasicSlave` Node 2 验证 MCU NMT Master。两种角色仍共用同一 `canopen_master` target 和全部 `src/*.cpp`。角色选择与 NMT 测试流程见 [`docs/CANopen_NMT_Master_Test.md`](docs/CANopen_NMT_Master_Test.md)。
 
 ## 自动测试链路
 
@@ -11,7 +11,7 @@
 - 主站 `0x1016:01 = 0x000105DC`：监控从机 Node-ID 1，超时 1500 ms；
 - 主站 `0x1017:00 = 500`：每 500 ms 发送 Producer Heartbeat。
 
-当前自动流程：
+Master stage 的固定顺序如下；当前实际执行项由各流程头文件中的 enable 宏决定：
 
 ```text
 Startup Boot
@@ -52,13 +52,17 @@ Startup Boot
    → 重复 EMCY 必须逐帧增加 remote_rx_count
    → 通过 Lely 本地 EMCY clear 发送标准 0x0000 recovery
    → Reset Communication 后确认 0x2301 count/last snapshot 保持不变，再发送 fresh EMCY 验证 callback 重绑
+→ J03/B09G GFC
+   → AsyncMaster 通过 SDO 保存/切换/恢复 MCU 0x1300 valid 参数
+   → 独立 Lely CanChannel 只注入/捕获固定 CAN-ID 0x001
+   → 通过 MCU 0x2302 验证 consumer count、producer sequence/result 和 Reset Communication rebind
 → 等待 Ctrl+C
 → Final Reset Communication
 ```
 
 A03 不使用外部 `cansend`，PDO 收发由 Lely `OnRpdo()`、`OnTpdo()`、`RpdoMapped()` 和 `TpdoMapped()` 完成。A04 同样不构造原始 CAN 帧，SYNC 由 Lely 本地 `0x1006` producer 定时器产生，并通过 `OnSync()` 与 `OnRpdo()` 建立同步时序证据。当前 EDS/DCF 已包含 A03/A04 所需的默认 PDO 和 SYNC 配置，不需要为该测试重新生成配置。
 
-A05 TIME Consumer 当前 `CANOPEN_ENABLE_TIME_PROCESS=1`，使用 MCU 测试固件的只读诊断记录 `0x2300:01..03` 参与 Master 自动流程。
+A05 TIME Consumer 实现保留，但当前 `CANOPEN_ENABLE_TIME_PROCESS=0`，因此不进入默认 Master 自动流程。
 
 ## 流程私有配置
 
@@ -70,7 +74,8 @@ A05 TIME Consumer 当前 `CANOPEN_ENABLE_TIME_PROCESS=1`，使用 MCU 测试固�
 - A04：`src/sync_pdo_process.cpp`；
 - A05：`src/time_process.cpp`；
 - A06：`src/emcy_process.cpp`，共享 EMCY 事件层位于 `src/canopen_emcy.cpp`；
-- B06：`src/emcy_consumer_process.cpp`，读取 MCU `0x2301` diagnostic。
+- B06：`src/emcy_consumer_process.cpp`，读取 MCU `0x2301` diagnostic；
+- J03/B09G：`src/gfc_process.cpp`，通过 MCU `0x1300/0x2302` 与独立 fixed-ID wire channel 验证 GFC。
 
 从机基线 Heartbeat 和 PDO 通信参数仍以 `config/master.yml`、EDS 和生成后的 DCF 为准。
 
@@ -89,6 +94,7 @@ include/canopen_emcy.h              共享 EMCY event observer
 include/canopen_master.h            B06-only Lely local EMCY test shim
 include/emcy_process.h              A06 EMCY producer 接口
 include/emcy_consumer_process.h     B06 EMCY consumer 接口
+include/gfc_process.h               J03/B09G GFC 接口
 include/nmt_master_process.h        NMT Master 行为验证接口（Slave role）
 src/canopen_emcy.cpp                唯一 OnEmcy callback、序列化缓存与时间戳
 src/nmt_heartbeat.cpp              Boot、Heartbeat 和 A01
@@ -98,6 +104,7 @@ src/sync_pdo_process.cpp           A04 SYNC consumer/同步 TPDO 验证
 src/time_process.cpp               A05 TIME consumer 主机侧验证
 src/emcy_process.cpp               A06 EMCY/0x1001/0x1003/0x1014/0x1015 验证
 src/emcy_consumer_process.cpp      B06 Host EMCY producer/MCU 0x2301 验证
+src/gfc_process.cpp                J03/B09G GFC fixed-ID wire/0x2302 验证
 src/nmt_master_process.cpp         Lely BasicSlave NMT callback 顺序验证
 src/main.cpp                       公共 Lely 生命周期、Master/Slave 角色入口
 src/shutdown_process.cpp           Final Reset Communication

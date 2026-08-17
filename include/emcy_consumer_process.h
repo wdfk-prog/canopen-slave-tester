@@ -7,7 +7,7 @@
 #define EMCY_CONSUMER_PROCESS_H
 
 /** Enable the B06 MCU EMCY consumer validation process. */
-#define CANOPEN_ENABLE_EMCY_CONSUMER_PROCESS 1
+#define CANOPEN_ENABLE_EMCY_CONSUMER_PROCESS 0
 
 class EmcyTestMaster;
 
