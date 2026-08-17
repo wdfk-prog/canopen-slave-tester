@@ -7,13 +7,14 @@
 #define NMT_HEARTBEAT_H
 
 /** Enable the A01 bidirectional Heartbeat verification process. */
-#define CANOPEN_ENABLE_HEARTBEAT_PROCESS 1
+#define CANOPEN_ENABLE_HEARTBEAT_PROCESS 0
 
 #include <chrono>
 
 namespace lely {
 namespace canopen {
 class AsyncMaster;
+enum class NmtState;
 } // namespace canopen
 } // namespace lely
 
@@ -41,6 +42,19 @@ void prepareBootWait();
  * @return true when an accepted Boot result is received; otherwise false.
  */
 bool waitForBootCompletion(std::chrono::milliseconds timeout);
+
+/**
+ * @brief Wait for a successful Boot callback and return its reported NMT state.
+ *
+ * Boot status zero and status 'L' are accepted. The output state is updated only
+ * when an accepted Boot result is received.
+ *
+ * @param timeout Maximum wait duration.
+ * @param state NMT state reported by the accepted Boot callback.
+ * @return true when an accepted Boot result is received; otherwise false.
+ */
+bool waitForBootCompletion(std::chrono::milliseconds timeout,
+                           lely::canopen::NmtState& state);
 
 /**
  * @brief Exercise both directions of Producer Heartbeat supervision.

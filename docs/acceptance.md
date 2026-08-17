@@ -1,11 +1,11 @@
-# A01-A06 自动测试验收
+# A01-A06/B06 自动测试验收
 
 ## 本地静态验收
 
 确认流程注册和 Lely PDO API：
 
 ```sh
-grep -R "heartbeatProcess\|sdoProcess\|pdoProcess\|syncPdoProcess\|timeProcess\|emcyProcess" src include
+grep -R "heartbeatProcess\|sdoProcess\|pdoProcess\|syncPdoProcess\|timeProcess\|emcyProcess\|emcyConsumerProcess" src include
 grep -R "OnRpdo\|OnTpdo\|RpdoMapped\|TpdoMapped\|WriteEvent" \
     src/pdo_process.cpp include/pdo_process.h
 ```
@@ -15,7 +15,8 @@ grep -R "OnRpdo\|OnTpdo\|RpdoMapped\|TpdoMapped\|WriteEvent" \
 ```sh
 grep -R "cansend\|struct can_frame\|PF_CAN\|SOCK_RAW" \
     src/pdo_process.cpp include/pdo_process.h \
-    src/sync_pdo_process.cpp include/sync_pdo_process.h
+    src/sync_pdo_process.cpp include/sync_pdo_process.h \
+    src/emcy_consumer_process.cpp include/emcy_consumer_process.h
 ```
 
 预期无结果。
@@ -229,6 +230,27 @@ Final Reset Communication completed
 
 辅助 `candump` 可确认动态阶段出现 `681#...`，但抓包不是唯一 PASS 依据，测试驱动仍全部使用 Lely/SDO。
 
+## B06 EMCY Consumer
+
+前置：MCU 固件启用 `PKG_CANOPENNODE_EM_CONSUMER` 与 `PKG_CANOPENNODE_DEMO_EMCY_CONSUMER_DIAGNOSTIC`，并提供只读 `0x2301:01..07`。Host 必须使用 Master role Node 127，local `0x1014` 对应标准 EMCY CAN-ID `0x0FF`，`0x1015=0`，且进入 B06 前没有预存的 Host local EMCY。生成的 compact `0x1003` 在 Lely EMCY service 第一次同步前可能仍反映 DCF 的初始 compact 值，因此 preflight 不把初始 `0x1003:00` 当作 active stack 深度。
+
+`pushLocalEmcy()` 在 master 锁内调用现有 COEmcy::push() 并返回结果，只有确认 local EMCY 已入栈后才更新 host_error_active/expected_host_error_count。
+
+通过条件：
+
+1. Host vector A `0xFF01 / ER=0x81 / MSEF=A1 12 34 56 78` 使 `remote_rx_count` 精确 `+1`；`source=127`、`COB-ID=0x0FF`、`errorBit=0xA1`、`infoCode=0x78563412`；
+2. 紧接 vector B `0xFF02 / ER=0x81 / MSEF=B2 87 65 43 21` 再精确 `+1`，字段对应 `errorBit=0xB2`、`infoCode=0x21436587`；
+3. Host 通过 Lely local EMCY `clear()` 发送 recovery，MCU 再精确 `+1` 且 `errorCode/errorRegister/errorBit/infoCode` 全为 0；
+4. 连续发送两次完全相同的 vector A，每次必须分别 `+1`；MCU diagnostic 不得做内容去重；
+5. 所有 snapshot 使用 `0x2301:01 count_before -> 0x2301:02..07 -> 0x2301:01 count_after`，只有前后 count 相等才接受；
+6. 至少一个 EMCY callback 后普通 SDO upload `0x1000:00` 成功，证明 diagnostic callback 没有阻塞 SDO server；
+7. Reset 前先发送并验证非零 vector A persistence marker；Host 定向发送 Reset Communication 并等待 fresh Boot，Reset 后 `0x2301` 的 `remote_rx_count` 与完整非零 last snapshot 必须和 reset 前完全一致；随后 vector B 必须在保留计数上再 `+1`，证明 diagnostic 持久性和 callback 已绑定到新 stack；
+8. post-reset recovery 仍可观察；fresh Boot callback 若已经报告 `START`，该 Boot 结果直接确认 MCU 已恢复 Operational，不再重复发送 NMT Start；否则必须发送 NMT Start 并通过 fresh `OnState(START)` 确认；
+9. 任一失败路径都必须清除 B06 自己产生的 Host local EMCY；调用全栈 `clear()` 前必须确认 `0x1003:00` 深度与 B06 未清 error 数一致、栈顶仍是 B06 error 且 combined Error Register 为 `0x81`，发现其他 Host fault 时必须拒绝清栈；如果已经执行 Reset Communication 且 fresh Boot 尚未证明 MCU Operational，必须尝试恢复 MCU Operational；
+10. B06 不写 MCU `0x1014/0x1015/0x1016`，不增加第二节点，不使用 `cansend`/Raw CAN。
+
+辅助 `candump` 应能观察 `0x0FF` 的非零 error EMCY 与 `0x0000` recovery；B06 自动 PASS 以 MCU `0x2301` SDO snapshot 和 Boot/NMT evidence 为准。完整目标板 HIL 还需结合现有全局 CAN state 日志和 CAN 抓包确认测试期间未进入 passive/bus-off，该项不由 `emcyConsumerProcess()` 的自动返回码判定。
+
 ## 验收矩阵
 
 | 编号 | 项目 | 通过判据 |
@@ -253,8 +275,13 @@ Final Reset Communication completed
 | 18 | A06 configurable COB-ID | slave 0x1014 与 master 0x1028:01 都切到 0x681 并可收到 EMCY |
 | 19 | A06 inhibit | 0x1015=15000 时 fault/reset 间隔 1400..2500 ms |
 | 20 | A06 cleanup | 0x1014/0x1015/0x1028/0x1017 全部恢复并回读，原 COB-ID smoke test 通过 |
-| 21 | 正常退出 | Final Reset Communication 完成 |
-| 22 | 完整验证 | 交叉构建、目标抓包和本地多轮复审均有实际证据 |
+| 21 | B06 single/consecutive EMCY | vector A/B 各产生一次精确 `remote_rx_count +1`，全部字段一致 |
+| 22 | B06 recovery/duplicate | recovery 为全零 payload；重复 A+A 各自计数，不去重 |
+| 23 | B06 SDO health | EMCY callback 后 `0x1000:00` upload 成功 |
+| 24 | B06 reset rebind | RESET_COMM + fresh Boot 后，0x2301 count/last snapshot 保持不变，再收到一次 vector B 与 recovery |
+| 25 | B06 cleanup | Host local EMCY stack 清理；Reset 后 MCU 恢复 Operational |
+| 26 | 正常退出 | Final Reset Communication 完成 |
+| 27 | 完整验证 | 交叉构建、目标抓包和本地多轮复审均有实际证据 |
 
 ## NMT Master / Slave 角色验收
 
@@ -262,14 +289,14 @@ Final Reset Communication completed
 
 ```sh
 grep -R "CANOPEN_ROLE" src include
-grep -n "g_canopen_processes\|nmtMasterProcess" src/main.cpp
+grep -n "makeCanopenProcesses\|canopenRunProcesses\|nmtMasterProcess" src/main.cpp
 ```
 
 要求：
 
 1. `CANOPEN_ROLE` 只在 `include/canopen_config.h` 直接选择 Master/Slave；
 2. Master/Slave 业务实现分支只在 `src/main.cpp` 的最终入口；`canopen_config.h` 保留角色值、选择值和合法性检查；
-3. Master `g_canopen_processes` 只包含 A01～A06；
+3. Master process table 统一包含 A01～A06/B06，并由 `canopenRunProcesses()` fail-fast 执行；
 4. `nmtMasterProcess()` 只由 Slave role 调用；
 5. 分别把 `CANOPEN_ROLE` 设为 `CANOPEN_ROLE_MASTER`/`CANOPEN_ROLE_SLAVE` 后，全部 `src/*.cpp` 都能通过 C++14 语法检查。
 

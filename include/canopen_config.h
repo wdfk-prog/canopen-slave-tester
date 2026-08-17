@@ -17,7 +17,7 @@
 /** CANopen host role value for the Lely BasicSlave test peer. */
 #define CANOPEN_ROLE_SLAVE 2
 /** Active host role; change this macro when switching test roles. */
-#define CANOPEN_ROLE CANOPEN_ROLE_SLAVE
+#define CANOPEN_ROLE CANOPEN_ROLE_MASTER
 
 #if CANOPEN_ROLE != CANOPEN_ROLE_MASTER && CANOPEN_ROLE != CANOPEN_ROLE_SLAVE
 #error "CANOPEN_ROLE must be CANOPEN_ROLE_MASTER or CANOPEN_ROLE_SLAVE"
@@ -28,9 +28,9 @@
 /** Expected nominal CAN bitrate in bit/s. */
 #define CANOPEN_EXPECTED_BITRATE 1000000
 
-/** Local CANopen master node-ID used by the A01-A06 tester role. */
+/** Local CANopen master node-ID used by the A01-A06/B06 tester role. */
 #define CANOPEN_MASTER_NODE_ID 127
-/** Managed MCU CANopen node-ID used by the A01-A06 tester role. */
+/** Managed MCU CANopen node-ID used by the A01-A06/B06 tester role. */
 #define CANOPEN_SLAVE_NODE_ID 1
 /** Lely software slave node-ID used by NMT-master validation. */
 #define CANOPEN_PEER_NODE_ID 2

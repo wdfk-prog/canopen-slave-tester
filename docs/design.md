@@ -1,10 +1,10 @@
-# A01-A06 自动测试设计
+# A01-A06/B06 自动测试设计
 
 ## 设计边界
 
-当前自动流程直接复用单个 `lely::canopen::AsyncMaster`，不创建 `BasicDriver`、`SlaveSession` 或重复协议 Service。`main.cpp` 只负责 Lely/SocketCAN 生命周期、Startup Boot、流程注册和退出；A01/A02/A03/A04/A05/A06 各自持有测试私有参数和断言逻辑；EMCY 因 Lely 只有一个 `OnEmcy()` callback 槽，由共享 observer 统一接收。
+当前自动流程直接复用单个 `lely::canopen::AsyncMaster`，不创建 `BasicDriver`、`SlaveSession` 或重复协议 Service。`main.cpp` 只负责 Lely/SocketCAN 生命周期、Startup Boot、流程注册和退出；A01/A02/A03/A04/A05/A06/B06 各自持有测试私有参数和断言逻辑；A01/A06 接收 EMCY 时因 Lely 只有一个 `OnEmcy()` callback 槽，由共享 observer 统一接收。B06 是反方向的 Host producer -> MCU consumer 验证，不占用 Host `OnEmcy()`。
 
-Host 现在支持两个编译角色，但共享同一 CMake、同一 `src/*.cpp` 和同一 Lely/SocketCAN 初始化。角色只由 `include/canopen_config.h` 的 `CANOPEN_ROLE` 选择：Master 角色继续执行 A01～A06；Slave 角色使用 Lely `BasicSlave` Node 2 验证 MCU NMT Master。NMT Master 测试不注册到 Master 的 `g_canopen_processes`。详细设计见 [CANopenNode NMT Master 测试设计](CANopen_NMT_Master_Test.md)。
+Host 现在支持两个编译角色，但共享同一 CMake、同一 `src/*.cpp` 和同一 Lely/SocketCAN 初始化。角色只由 `include/canopen_config.h` 的 `CANOPEN_ROLE` 选择：Master 角色继续执行 A01～A06/B06；Slave 角色使用 Lely `BasicSlave` Node 2 验证 MCU NMT Master。Master 在 `runCanopenMaster()` 中绑定统一 callable process table；NMT Master 测试不进入该表。详细设计见 [CANopenNode NMT Master 测试设计](CANopen_NMT_Master_Test.md)。
 
 当前 Master 顺序：
 
@@ -16,6 +16,7 @@ Startup Boot
 → A04 SYNC PDO
 → A05 TIME
 → A06 EMCY
+→ B06 EMCY Consumer
 → 等待 Ctrl+C/SIGTERM
 → Final Reset Communication
 ```
@@ -30,7 +31,7 @@ src/main.cpp
 ├─ 注册 CAN/Boot/Heartbeat callback 和共享 EMCY observer
 ├─ 启动 Loop::run() 工作线程
 ├─ Reset 并等待 Startup Boot
-├─ canopenRunProcesses(A01, A02, A03, A04, A05, A06)
+├─ canopenRunProcesses(A01, A02, A03, A04, A05, A06, B06)
 ├─ 等待退出信号
 ├─ finalResetProcess()
 └─ shutdown Context 并 join 线程
@@ -132,7 +133,7 @@ restored event timer tolerance = +/-150 ms
 → waitForBootCompletion()
 ```
 
-Boot callback `status == 0` 或 `status == 'L'` 视为可继续自动流程。其他结果或等待超时阻止 A01-A06。
+Boot callback `status == 0` 或 `status == 'L'` 视为可继续自动流程。其他结果或等待超时阻止 A01-A06/B06。
 
 ## A01 Heartbeat
 
@@ -331,6 +332,50 @@ slave 0x1014: disabled old -> 0x681
 
 清理始终恢复保存值而不是硬编码默认值：先恢复主站 Heartbeat 并轮询 `0x1001` 清零，再恢复 `0x1015`，禁用当前 slave EMCY producer，恢复 master `0x1028:01`，最后恢复 slave `0x1014`。全部回读一致后再在原 COB-ID 上执行一次 fault/reset 和 `0x1000` SDO smoke read。`0x1003` 不清空，以免删除测试前历史。
 
+## B06 EMCY Consumer
+
+B06 与 A06 方向相反：A06 验证 MCU producer -> Host consumer；B06 使用 Host Node 127 的 Lely EMCY producer 验证 MCU consumer -> application diagnostic。Host 不增加第二 CANopen 节点，也不构造 Raw CAN。
+
+MCU 测试固件提供只读 diagnostic `0x2301:01..07`：
+
+```text
+01 remote_rx_count      U32
+02 last_source_node_id  U8
+03 last_cob_id          U16
+04 last_error_code      U16
+05 last_error_register  U8
+06 last_error_bit       U8
+07 last_info_code       U32
+```
+
+因为这些字段由多次独立 SDO upload 读取，Host 使用一致性读法：先读 `remote_rx_count`，再读 `02..07`，最后再次读取 `remote_rx_count`；只有前后计数一致才接受该 snapshot，否则最多重试 3 次。每个 Host 发送动作都要求计数精确 `+1`，因此重复内容的 EMCY 也不能被静默去重。
+
+Host error vector 使用 manufacturer/device-specific `0xFF01/0xFF02`，避免触发 `0x81xx` communication error behavior。MSEF 使用非对称字节，分别验证 CANopenNode callback 的 `errorBit` 与 `infoCode` 字节布局。
+
+非零 EMCY 通过 `EmcyTestMaster::pushLocalEmcy()` 产生。Lely 高层 API 对 `Error(0)` 不发送 recovery，因此工程使用 B06-only `EmcyTestMaster` 对 Lely 自己的 local EMCY service 暴露最小 `push/peek/clear`；调用保持 Lely master 锁，并由 `clear()` 发送标准 `0x0000` error-reset/no-error EMCY，不引入 Raw CAN 协议路径。
+
+`pushLocalEmcy()` 在 master 锁内调用现有 COEmcy::push() 并返回结果，只有确认 local EMCY 已入栈后才更新 host_error_active/expected_host_error_count。
+
+B06 顺序覆盖：
+
+```text
+single vector A
+-> consecutive vector B
+-> recovery 0x0000
+-> duplicate A + A
+-> duplicate cleanup recovery
+-> ordinary SDO 0x1000 smoke read
+-> nonzero Vector A persistence marker
+-> Reset Communication + fresh Boot with reported NMT state
+-> require post-reset 0x2301 snapshot equals the full nonzero pre-reset snapshot
+-> vector B + recovery
+-> if Boot did not already report Operational: NMT Start + fresh OnState(START)
+```
+
+MCU `remote_rx_count` 与最后一条 EMCY snapshot 设计为跨 communication reset 保留。Host 在 fresh Boot 后先要求 `0x2301` 与 reset 前 snapshot 完全一致，再要求后续 fresh EMCY 精确 `+1`，从外部同时证明 diagnostic 持久性以及 `CO_EM_initCallbackRx()` 已绑定到新 `CO_t`。fresh Boot callback 同时保存其报告的 NMT state；如果已经是 `START`，该 Boot 结果直接证明节点已被 Lely Boot manager 恢复到 Operational，B06 不再发送冗余 NMT Start，也不等待不会产生的 fresh `OnState(START)`；仅在 Boot state 不是 `START` 时才显式 Start 并等待状态事件。B06 preflight 只要求 Host active EMCY stack 为空，不把尚未由 Lely EMCY service 同步的 compact `0x1003:00` 初始值当作历史深度。任何失败路径都清理 B06 自己产生的 Host EMCY；清理前重新检查 `0x1003:00` 深度、栈顶仍属于 B06 且 combined Error Register 仍为 `0x81`，若出现其他 Host fault 则拒绝调用全栈 `clear()`。若已执行 remote Reset Communication 且 Boot 尚未证明节点已经 Operational，还必须尝试恢复节点 1 Operational。
+
+详细用例和 HIL 判据见 [B06 EMCY Consumer 测试](CANopen_EMCY_Consumer_Test.md)。
+
 ## 退出
 
 收到 `SIGINT` 或 `SIGTERM` 后：
@@ -343,7 +388,7 @@ finalResetProcess(master)
 → join event-loop thread
 ```
 
-由于 `boot:true`，Final Reset 会再次执行节点配置。主站随后退出导致节点 1 检测到主站 Heartbeat 丢失，属于真实离线行为，不计入 A01-A06 自动测试结果。
+由于 `boot:true`，Final Reset 会再次执行节点配置。主站随后退出导致节点 1 检测到主站 Heartbeat 丢失，属于真实离线行为，不计入 A01-A06/B06 自动测试结果。
 
 ## 兼容性和影响范围
 
@@ -356,3 +401,4 @@ finalResetProcess(master)
 - 新增 A03 流程开关和 `pdoProcess()` 工程内部接口；
 - 新增 A04 流程开关和 `syncPdoProcess()` 工程内部接口；A04 只临时修改运行期 `0x1800` 和主站本地 `0x1006`，不修改 EDS/DCF；
 - 新增共享 `canopen_emcy` observer 和 A06 `emcyProcess()`；A06 只临时修改 `0x1014/0x1015/0x1028:01/0x1017` 并严格恢复。
+- B06 新增 `emcyConsumerProcess()` 与 `EmcyTestMaster` 的最小 local EMCY test shim；不修改 MCU 通信参数，只读取 `0x2301` diagnostic。

@@ -7,7 +7,7 @@
 #define TIME_PROCESS_H
 
 /** Enable A05 after the MCU exposes the required 0x2300 diagnostic record. */
-#define CANOPEN_ENABLE_TIME_PROCESS 1
+#define CANOPEN_ENABLE_TIME_PROCESS 0
 
 namespace lely {
 namespace canopen {

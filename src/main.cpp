@@ -6,8 +6,10 @@
 #include "canopen_config.h"
 #include "canopen_emcy.h"
 #include "canopen_nmt.h"
+#include "canopen_master.h"
 #include "canopen_process.h"
 #include "emcy_process.h"
+#include "emcy_consumer_process.h"
 #include "nmt_heartbeat.h"
 #include "nmt_master_process.h"
 #include "pdo_process.h"
@@ -45,34 +47,52 @@
 
 namespace {
 
-/** Ordered master-side automatic test process table. */
-const std::array<CanopenProcessEntry,
-                 CANOPEN_ENABLE_HEARTBEAT_PROCESS
-                     + CANOPEN_ENABLE_SDO_PROCESS
-                     + CANOPEN_ENABLE_PDO_PROCESS
-                     + CANOPEN_ENABLE_SYNC_PDO_PROCESS
-                     + CANOPEN_ENABLE_TIME_PROCESS
-                     + CANOPEN_ENABLE_EMCY_PROCESS>
-    g_canopen_processes = {{
+/** Number of enabled master-side automatic validation processes. */
+constexpr std::size_t kCanopenProcessCount =
+    CANOPEN_ENABLE_HEARTBEAT_PROCESS
+    + CANOPEN_ENABLE_SDO_PROCESS
+    + CANOPEN_ENABLE_PDO_PROCESS
+    + CANOPEN_ENABLE_SYNC_PDO_PROCESS
+    + CANOPEN_ENABLE_TIME_PROCESS
+    + CANOPEN_ENABLE_EMCY_PROCESS
+    + CANOPEN_ENABLE_EMCY_CONSUMER_PROCESS;
+
+/** Ordered master-side automatic validation process table type. */
+using CanopenProcessTable = std::array<CanopenProcessEntry, kCanopenProcessCount>;
+
+/**
+ * @brief Bind all enabled master-side validation processes to one master.
+ *
+ * @param master Active Host master; B06 additionally uses its local EMCY shim.
+ * @return Ordered callable process table.
+ */
+CanopenProcessTable makeCanopenProcesses(EmcyTestMaster& master)
+{
+    return {{
 #if CANOPEN_ENABLE_HEARTBEAT_PROCESS
-        {"A01 Heartbeat", heartbeatProcess},
+        {"A01 Heartbeat", [&master]() { return heartbeatProcess(master); }},
 #endif /* CANOPEN_ENABLE_HEARTBEAT_PROCESS */
 #if CANOPEN_ENABLE_SDO_PROCESS
-        {"A02 SDO", sdoProcess},
+        {"A02 SDO", [&master]() { return sdoProcess(master); }},
 #endif /* CANOPEN_ENABLE_SDO_PROCESS */
 #if CANOPEN_ENABLE_PDO_PROCESS
-        {"A03 PDO", pdoProcess},
+        {"A03 PDO", [&master]() { return pdoProcess(master); }},
 #endif /* CANOPEN_ENABLE_PDO_PROCESS */
 #if CANOPEN_ENABLE_SYNC_PDO_PROCESS
-        {"A04 SYNC PDO", syncPdoProcess},
+        {"A04 SYNC PDO", [&master]() { return syncPdoProcess(master); }},
 #endif /* CANOPEN_ENABLE_SYNC_PDO_PROCESS */
 #if CANOPEN_ENABLE_TIME_PROCESS
-        {"A05 TIME", timeProcess},
+        {"A05 TIME", [&master]() { return timeProcess(master); }},
 #endif /* CANOPEN_ENABLE_TIME_PROCESS */
 #if CANOPEN_ENABLE_EMCY_PROCESS
-        {"A06 EMCY", emcyProcess},
+        {"A06 EMCY", [&master]() { return emcyProcess(master); }},
 #endif /* CANOPEN_ENABLE_EMCY_PROCESS */
+#if CANOPEN_ENABLE_EMCY_CONSUMER_PROCESS
+        {"B06 EMCY Consumer",
+         [&master]() { return emcyConsumerProcess(master); }},
+#endif /* CANOPEN_ENABLE_EMCY_CONSUMER_PROCESS */
     }};
+}
 
 /** Signal-safe shutdown request flag; zero means no termination signal yet. */
 volatile std::sig_atomic_t g_stop_requested = 0;
@@ -246,7 +266,7 @@ bool validateCanBitrate(lely::io::CanController& controller)
 }
 
 /**
- * @brief Run the existing AsyncMaster-based A01-A06 tester role.
+ * @brief Run the existing AsyncMaster-based A01-A06/B06 tester role.
  *
  * @param context Common Lely I/O context used to stop the worker on exit.
  * @param loop Common Lely event loop.
@@ -266,8 +286,8 @@ int runCanopenMaster(lely::io::Context& context, lely::ev::Loop& loop,
      * master.Reset(); this gates every automatic process. */
     bool startup_boot_succeeded = false;
     /* The master owns local OD state, SDO/PDO services, NMT control, and all
-     * callbacks used by the enabled A01-A06 processes. */
-    lely::canopen::AsyncMaster master(
+     * callbacks used by the enabled A01-A06/B06 processes. */
+    EmcyTestMaster master(
         executor, timer, channel, CANOPEN_MASTER_DCF_PATH, "",
         CANOPEN_MASTER_NODE_ID);
     master.OnCanState(canStateCallback);
@@ -298,11 +318,12 @@ int runCanopenMaster(lely::io::Context& context, lely::ev::Loop& loop,
                      CANOPEN_SLAVE_NODE_ID);
     }
 
-    /* Execute only A01-A06 master-side processes. NMT-master validation is a
-     * slave-role responsibility and is intentionally absent from this table. */
+    /* All enabled A-stage and B-stage master processes use one ordered
+     * fail-fast runner; bound callables preserve each process's master type. */
     if (startup_boot_succeeded) {
-        error_count += canopenRunProcesses(master, g_canopen_processes.data(),
-                                           g_canopen_processes.size());
+        const CanopenProcessTable canopen_processes = makeCanopenProcesses(master);
+        error_count += canopenRunProcesses(canopen_processes.data(),
+                                           canopen_processes.size());
     }
 
     /* Preserve the existing interactive lifetime: automatic validation ends

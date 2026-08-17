@@ -7,7 +7,7 @@
 #define PDO_PROCESS_H
 
 /** Enable the A03 RPDO/TPDO verification process. */
-#define CANOPEN_ENABLE_PDO_PROCESS 1
+#define CANOPEN_ENABLE_PDO_PROCESS 0
 
 namespace lely {
 namespace canopen {

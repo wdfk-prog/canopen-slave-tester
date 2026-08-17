@@ -60,6 +60,8 @@ std::condition_variable g_boot_condition;
 bool g_boot_received = false;
 /** false is the conservative default until an accepted Boot status arrives. */
 bool g_boot_succeeded = false;
+/** NMT state reported by the most recent Boot callback. */
+lely::canopen::NmtState g_boot_state = lely::canopen::NmtState::BOOTUP;
 
 /** Protects expected/observed remote heartbeat supervision state. */
 std::mutex g_heartbeat_mutex;
@@ -94,6 +96,7 @@ void bootCallback(std::uint8_t node_id, lely::canopen::NmtState state,
         std::lock_guard<std::mutex> lock(g_boot_mutex);
         g_boot_received = true;
         g_boot_succeeded = succeeded;
+        g_boot_state = state;
     }
     g_boot_condition.notify_all();
 
@@ -312,9 +315,16 @@ void prepareBootWait()
     std::lock_guard<std::mutex> lock(g_boot_mutex);
     g_boot_received = false;
     g_boot_succeeded = false;
+    g_boot_state = lely::canopen::NmtState::BOOTUP;
 }
 
-bool waitForBootCompletion(std::chrono::milliseconds timeout)
+namespace {
+
+/**
+ * @brief Wait for a fresh accepted Boot result and optionally copy its state.
+ */
+bool waitForBootResult(std::chrono::milliseconds timeout,
+                       lely::canopen::NmtState* state)
 {
     /* Release the mutex while waiting so bootCallback() can publish the new
      * Boot result on the event-loop thread. */
@@ -323,7 +333,26 @@ bool waitForBootCompletion(std::chrono::milliseconds timeout)
             lock, timeout, []() { return g_boot_received; })) {
         return false;
     }
-    return g_boot_succeeded;
+    if (!g_boot_succeeded) {
+        return false;
+    }
+    if (state != nullptr) {
+        *state = g_boot_state;
+    }
+    return true;
+}
+
+} // namespace
+
+bool waitForBootCompletion(std::chrono::milliseconds timeout)
+{
+    return waitForBootResult(timeout, nullptr);
+}
+
+bool waitForBootCompletion(std::chrono::milliseconds timeout,
+                           lely::canopen::NmtState& state)
+{
+    return waitForBootResult(timeout, &state);
 }
 
 int heartbeatProcess(lely::canopen::AsyncMaster& master)

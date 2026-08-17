@@ -7,7 +7,7 @@
 #define SDO_PROCESS_H
 
 /** Enable the A02 user OD SDO verification process. */
-#define CANOPEN_ENABLE_SDO_PROCESS 1
+#define CANOPEN_ENABLE_SDO_PROCESS 0
 
 namespace lely {
 namespace canopen {

@@ -7,7 +7,7 @@
 #define SYNC_PDO_PROCESS_H
 
 /** Enable the A04 SYNC consumer and synchronous TPDO verification process. */
-#define CANOPEN_ENABLE_SYNC_PDO_PROCESS 1
+#define CANOPEN_ENABLE_SYNC_PDO_PROCESS 0
 
 namespace lely {
 namespace canopen {
