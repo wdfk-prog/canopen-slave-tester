@@ -7,7 +7,7 @@
 #define EMCY_PROCESS_H
 
 /** Enable the A06 EMCY producer validation process. */
-#define CANOPEN_ENABLE_EMCY_PROCESS 1
+#define CANOPEN_ENABLE_EMCY_PROCESS 0
 
 namespace lely {
 namespace canopen {

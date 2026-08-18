@@ -7,7 +7,7 @@
 #define GFC_PROCESS_H
 
 /** Enable J03/B09G Global Fail-safe Command validation. */
-#define CANOPEN_ENABLE_GFC_PROCESS 1
+#define CANOPEN_ENABLE_GFC_PROCESS 0
 
 namespace lely {
 namespace io {

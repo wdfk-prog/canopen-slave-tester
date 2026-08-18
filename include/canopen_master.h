@@ -1,6 +1,6 @@
 /**
  * @file
- * @brief B06-only AsyncMaster access shim for local EMCY test operations.
+ * @brief Narrow AsyncMaster access shim for local test services.
  */
 
 #ifndef CANOPEN_MASTER_H
@@ -15,14 +15,16 @@
 #include <cstdint>
 #include <mutex>
 
+class HostSdoServerFixture;
+
 /**
- * @brief B06 test master with narrow access to Lely's local EMCY service.
+ * @brief Test master with narrow access to Lely local services.
  *
  * Lely's high-level AsyncMaster::Error() does not expose the return value from
  * the underlying local EMCY push operation, and the coapp API does not expose
  * the clear operation required to emit a standard error-reset message. This
- * B06-only shim exposes only push/peek/clear operations from Lely's existing
- * EMCY service; it does not implement a second CANopen protocol path.
+ * shim exposes only the local services required by B06 and J04 fixtures; it
+ * does not implement a second CANopen protocol path.
  */
 class EmcyTestMaster final : public lely::canopen::AsyncMaster {
 public:
@@ -131,6 +133,31 @@ public:
     }
 
 private:
+    friend class HostSdoServerFixture;
+
+    /** @return Lely's existing local NMT service, or null if unavailable. */
+    lely::CONMT* localNmtService() noexcept
+    {
+        __co_nmt* const raw_nmt = nmt();
+        return raw_nmt != nullptr ? reinterpret_cast<lely::CONMT*>(raw_nmt)
+                                  : nullptr;
+    }
+
+    /** @return Local Object Dictionary owned by the master NMT service. */
+    co_dev_t* localDevice() noexcept
+    {
+        lely::CONMT* const local_nmt = localNmtService();
+        return local_nmt != nullptr
+            ? reinterpret_cast<co_dev_t*>(local_nmt->getDev()) : nullptr;
+    }
+
+    /** @return Default local Server-SDO number 1, or null if unavailable. */
+    lely::COSSDO* localServerSdo() noexcept
+    {
+        lely::CONMT* const local_nmt = localNmtService();
+        return local_nmt != nullptr ? local_nmt->getSSDO(1U) : nullptr;
+    }
+
     /**
      * @brief Read the synchronized OD 0x1003 active-error count.
      *
@@ -153,11 +180,8 @@ private:
     /** @return Lely's existing local EMCY service, or null if unavailable. */
     lely::COEmcy* localEmcyService() noexcept
     {
-        __co_nmt* const raw_nmt = nmt();
-        if (raw_nmt == nullptr) {
-            return nullptr;
-        }
-        return reinterpret_cast<lely::CONMT*>(raw_nmt)->getEmcy();
+        lely::CONMT* const local_nmt = localNmtService();
+        return local_nmt != nullptr ? local_nmt->getEmcy() : nullptr;
     }
 };
 

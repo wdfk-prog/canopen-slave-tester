@@ -15,6 +15,7 @@
 #include "nmt_master_process.h"
 #include "pdo_process.h"
 #include "sdo_process.h"
+#include "sdo_client_process.h"
 #include "shutdown_process.h"
 #include "sync_pdo_process.h"
 #include "time_process.h"
@@ -52,6 +53,7 @@ namespace {
 constexpr std::size_t kCanopenProcessCount =
     CANOPEN_ENABLE_HEARTBEAT_PROCESS
     + CANOPEN_ENABLE_SDO_PROCESS
+    + CANOPEN_ENABLE_SDO_CLIENT_PROCESS
     + CANOPEN_ENABLE_PDO_PROCESS
     + CANOPEN_ENABLE_SYNC_PDO_PROCESS
     + CANOPEN_ENABLE_TIME_PROCESS
@@ -83,6 +85,9 @@ CanopenProcessTable makeCanopenProcesses(
 #if CANOPEN_ENABLE_SDO_PROCESS
         {"A02 SDO", [&master]() { return sdoProcess(master); }},
 #endif /* CANOPEN_ENABLE_SDO_PROCESS */
+#if CANOPEN_ENABLE_SDO_CLIENT_PROCESS
+        {"B03 MCU SDO Client", [&master]() { return sdoClientProcess(master); }},
+#endif /* CANOPEN_ENABLE_SDO_CLIENT_PROCESS */
 #if CANOPEN_ENABLE_PDO_PROCESS
         {"A03 PDO", [&master]() { return pdoProcess(master); }},
 #endif /* CANOPEN_ENABLE_PDO_PROCESS */
