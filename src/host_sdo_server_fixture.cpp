@@ -16,7 +16,7 @@
 
 #include <mutex>
 
-HostSdoServerFixture::HostSdoServerFixture(EmcyTestMaster& master) noexcept
+HostSdoServerFixture::HostSdoServerFixture(CanopenTestMaster& master) noexcept
     : master_(master)
 {
 }

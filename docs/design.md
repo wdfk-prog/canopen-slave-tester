@@ -2,7 +2,7 @@
 
 ## 设计边界
 
-主 CANopen 流程复用单个 `EmcyTestMaster`/`AsyncMaster`，不创建第二套 CANopen protocol Service。`main.cpp` 负责 Lely/SocketCAN 生命周期、Startup Boot、流程注册和退出；各 stage 持有测试私有参数和断言逻辑。J03/B09G 是唯一需要 wire-level fixture 的当前 stage：它在同一 `can1` 上创建第二个独立 `CanChannel`，只处理固定 CAN-ID `0x001`，不分配第二个 CANopen Node-ID。
+主 CANopen 流程复用单个 `CanopenTestMaster`/`AsyncMaster`，不创建第二套 CANopen protocol Service。`main.cpp` 负责 Lely/SocketCAN 生命周期、Startup Boot、流程注册和退出；各 stage 持有测试私有参数和断言逻辑。J03/B09G 是唯一需要 wire-level fixture 的当前 stage：它在同一 `can1` 上创建第二个独立 `CanChannel`，只处理固定 CAN-ID `0x001`，不分配第二个 CANopen Node-ID。
 
 Host 支持两个编译角色，共享同一 CMake 和 `src/*.cpp`。角色只由 `include/canopen_config.h` 的 `CANOPEN_ROLE` 选择：Master 角色执行当前启用的 A/B stage；Slave 角色使用 Lely `BasicSlave` Node 2 验证 MCU NMT Master。Master 在 `runCanopenMaster()` 中绑定统一 callable process table；B09G 额外绑定 stage-local wire channel，NMT Master 测试不进入该表。详细设计见 [CANopenNode NMT Master 测试设计](CANopen_NMT_Master_Test.md)。
 
@@ -353,7 +353,7 @@ MCU 测试固件提供只读 diagnostic `0x2301:01..07`：
 
 Host error vector 使用 manufacturer/device-specific `0xFF01/0xFF02`，避免触发 `0x81xx` communication error behavior。MSEF 使用非对称字节，分别验证 CANopenNode callback 的 `errorBit` 与 `infoCode` 字节布局。
 
-非零 EMCY 通过 `EmcyTestMaster::pushLocalEmcy()` 产生。Lely 高层 API 对 `Error(0)` 不发送 recovery，因此工程使用 B06-only `EmcyTestMaster` 对 Lely 自己的 local EMCY service 暴露最小 `push/peek/clear`；调用保持 Lely master 锁，并由 `clear()` 发送标准 `0x0000` error-reset/no-error EMCY，不引入 Raw CAN 协议路径。
+非零 EMCY 通过 `CanopenTestMaster::pushLocalEmcy()` 产生。Lely 高层 API 对 `Error(0)` 不发送 recovery，因此工程通过 `CanopenTestMaster` 为 B06 对 Lely 自己的 local EMCY service 暴露最小 `push/peek/clear`；调用保持 Lely master 锁，并由 `clear()` 发送标准 `0x0000` error-reset/no-error EMCY，不引入 Raw CAN 协议路径。
 
 `pushLocalEmcy()` 在 master 锁内调用现有 COEmcy::push() 并返回结果，只有确认 local EMCY 已入栈后才更新 host_error_active/expected_host_error_count。
 
@@ -379,7 +379,7 @@ MCU `remote_rx_count` 与最后一条 EMCY snapshot 设计为跨 communication r
 
 ## J03 / B09G GFC
 
-B09G 保持 CANopen 协议控制和 wire-level 观测分离。`EmcyTestMaster` 继续独占原 master channel，并通过 SDO 访问 MCU `0x1300/0x2302`；`main.cpp` 只在 Master role 且 B09G 启用时，在同一 `CanController` 上打开第二个 `CanChannel(txwait=false)`。`gfc_process.cpp` 的私有 fixture 只发送/捕获 CAN-ID `0x001`，不向其他 stage 暴露通用 Raw CAN API。
+B09G 保持 CANopen 协议控制和 wire-level 观测分离。`CanopenTestMaster` 继续独占原 master channel，并通过 SDO 访问 MCU `0x1300/0x2302`；`main.cpp` 只在 Master role 且 B09G 启用时，在同一 `CanController` 上打开第二个 `CanChannel(txwait=false)`。`gfc_process.cpp` 的私有 fixture 只发送/捕获 CAN-ID `0x001`，不向其他 stage 暴露通用 Raw CAN API。
 
 Consumer 路径用固定 `0x001/DLC0` 注入并通过 `0x2302.rx_count` 精确计数；valid=0 和 DLC1 使用有界负向窗口证明不产生合法 callback。Producer 路径用 sequence-based `producer_request_seq/producer_complete_seq` 把 `CO_GFCsend()` 保留在 MCU mainline，再以第二 channel 的 timestamped wire capture 证明标准 `0x001/DLC0` 真正出现在总线上。
 
@@ -412,5 +412,5 @@ finalResetProcess(master)
 - 新增 A03 流程开关和 `pdoProcess()` 工程内部接口；
 - 新增 A04 流程开关和 `syncPdoProcess()` 工程内部接口；A04 只临时修改运行期 `0x1800` 和主站本地 `0x1006`，不修改 EDS/DCF；
 - 新增共享 `canopen_emcy` observer 和 A06 `emcyProcess()`；A06 只临时修改 `0x1014/0x1015/0x1028:01/0x1017` 并严格恢复。
-- B06 新增 `emcyConsumerProcess()` 与 `EmcyTestMaster` 的最小 local EMCY test shim；不修改 MCU 通信参数，只读取 `0x2301` diagnostic；
+- B06 新增 `emcyConsumerProcess()` 与 `CanopenTestMaster` 的最小 local EMCY test shim；不修改 MCU 通信参数，只读取 `0x2301` diagnostic；
 - J03/B09G 新增 `gfcProcess()` 与独立 fixed-ID Lely wire channel；只访问 MCU `0x1300/0x2302` 和 CAN-ID `0x001`，不修改 Lely 源码。

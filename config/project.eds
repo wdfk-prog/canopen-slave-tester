@@ -1956,10 +1956,11 @@ DefaultValue=0x00000000
 PDOMapping=0
 
 [ManufacturerObjects]
-SupportedObjects=3
+SupportedObjects=4
 1=0x2100
 2=0x2101
 3=0x2200
+4=0x2304
 
 [2100]
 ParameterName=status_value
@@ -1988,3 +1989,11 @@ AccessType=rww
 DefaultValue=0
 PDOMapping=1
 
+[2304]
+ParameterName=sdo_server_block_test
+ObjectType=0x7
+;StorageLocation=RAM
+DataType=0x000F
+AccessType=rw
+DefaultValue=
+PDOMapping=0

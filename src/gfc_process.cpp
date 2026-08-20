@@ -557,7 +557,7 @@ bool validateProducerFrame(const GfcWireFrame& frame)
 /**
  * @brief Run valid/invalid consumer tests and continuous delivery counting.
  */
-bool validateConsumerCases(EmcyTestMaster& master,
+bool validateConsumerCases(CanopenTestMaster& master,
                            GfcWireFixture& fixture,
                            GfcDiagnostic& diagnostic)
 {
@@ -631,7 +631,7 @@ bool validateConsumerCases(EmcyTestMaster& master,
 /**
  * @brief Validate MCU GFC producer gating and exact wire format.
  */
-bool validateProducerCases(EmcyTestMaster& master,
+bool validateProducerCases(CanopenTestMaster& master,
                            GfcWireFixture& fixture,
                            GfcDiagnostic& diagnostic)
 {
@@ -727,7 +727,7 @@ bool validateProducerCases(EmcyTestMaster& master,
 /**
  * @brief Reset MCU communication and prove the GFC consumer callback is rebound.
  */
-bool validateResetRebind(EmcyTestMaster& master,
+bool validateResetRebind(CanopenTestMaster& master,
                          GfcWireFixture& fixture,
                          GfcRuntimeState& state,
                          GfcDiagnostic& diagnostic)
@@ -829,7 +829,7 @@ bool validateProtocolHealth(lely::canopen::AsyncMaster& master)
  * producer first so a late mainline execution cannot emit a new GFC, then wait
  * for the request/complete sequence pair to converge before restoring 0x1300.
  */
-bool settlePendingProducer(EmcyTestMaster& master)
+bool settlePendingProducer(CanopenTestMaster& master)
 {
     /* Disable GFC before inspecting the sequence pair. If a prior request is
      * still pending, a late mainline execution must not emit another frame. */
@@ -887,7 +887,7 @@ bool settlePendingProducer(EmcyTestMaster& master)
 /**
  * @brief Restore J03-owned remote configuration/state after success or failure.
  */
-bool cleanupGfcValidation(EmcyTestMaster& master,
+bool cleanupGfcValidation(CanopenTestMaster& master,
                           GfcRuntimeState& state)
 {
     bool result = true;
@@ -940,7 +940,7 @@ bool cleanupGfcValidation(EmcyTestMaster& master,
 /**
  * @brief Execute the complete first-version J03/B09G protocol sequence.
  */
-bool runGfcValidation(EmcyTestMaster& master,
+bool runGfcValidation(CanopenTestMaster& master,
                       GfcWireFixture& fixture,
                       GfcRuntimeState& state)
 {
@@ -992,7 +992,7 @@ bool runGfcValidation(EmcyTestMaster& master,
 
 } // namespace
 
-int gfcProcess(EmcyTestMaster& master, lely::io::CanChannel& wire_channel)
+int gfcProcess(CanopenTestMaster& master, lely::io::CanChannel& wire_channel)
 {
     GfcWireFixture fixture(wire_channel);
     GfcRuntimeState state;

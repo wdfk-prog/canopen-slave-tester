@@ -15,6 +15,7 @@
 #include "nmt_master_process.h"
 #include "pdo_process.h"
 #include "sdo_process.h"
+#include "sdo_block_process.h"
 #include "sdo_client_process.h"
 #include "shutdown_process.h"
 #include "sync_pdo_process.h"
@@ -53,6 +54,7 @@ namespace {
 constexpr std::size_t kCanopenProcessCount =
     CANOPEN_ENABLE_HEARTBEAT_PROCESS
     + CANOPEN_ENABLE_SDO_PROCESS
+    + CANOPEN_ENABLE_SDO_BLOCK_PROCESS
     + CANOPEN_ENABLE_SDO_CLIENT_PROCESS
     + CANOPEN_ENABLE_PDO_PROCESS
     + CANOPEN_ENABLE_SYNC_PDO_PROCESS
@@ -72,7 +74,7 @@ using CanopenProcessTable = std::array<CanopenProcessEntry, kCanopenProcessCount
  * @return Ordered callable process table.
  */
 CanopenProcessTable makeCanopenProcesses(
-    EmcyTestMaster& master
+    CanopenTestMaster& master
 #if CANOPEN_ENABLE_GFC_PROCESS
     , lely::io::CanChannel& gfc_wire_channel
 #endif /* CANOPEN_ENABLE_GFC_PROCESS */
@@ -85,6 +87,9 @@ CanopenProcessTable makeCanopenProcesses(
 #if CANOPEN_ENABLE_SDO_PROCESS
         {"A02 SDO", [&master]() { return sdoProcess(master); }},
 #endif /* CANOPEN_ENABLE_SDO_PROCESS */
+#if CANOPEN_ENABLE_SDO_BLOCK_PROCESS
+        {"B02 SDO Server Block", [&master]() { return sdoBlockProcess(master); }},
+#endif /* CANOPEN_ENABLE_SDO_BLOCK_PROCESS */
 #if CANOPEN_ENABLE_SDO_CLIENT_PROCESS
         {"B03 MCU SDO Client", [&master]() { return sdoClientProcess(master); }},
 #endif /* CANOPEN_ENABLE_SDO_CLIENT_PROCESS */
@@ -311,7 +316,7 @@ int runCanopenMaster(
     bool startup_boot_succeeded = false;
     /* The master owns local OD state, SDO/PDO services, NMT control, and all
      * callbacks used by the enabled A/B processes. */
-    EmcyTestMaster master(
+    CanopenTestMaster master(
         executor, timer, channel, CANOPEN_MASTER_DCF_PATH, "",
         CANOPEN_MASTER_NODE_ID);
     master.OnCanState(canStateCallback);

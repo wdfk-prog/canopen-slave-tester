@@ -74,7 +74,7 @@ const int result = master.pushLocalEmcy(error_code, error_register, msef, stack_
 
 `pushLocalEmcy()` 在 master 锁内调用现有 COEmcy::push() 并返回结果，只有确认 local EMCY 已入栈后才更新 host_error_active/expected_host_error_count。
 
-Lely `AsyncMaster::Error(0, ...)` 不产生 recovery。工程的 `EmcyTestMaster` 仅作为 B06 access shim，在 Lely master 锁内访问现有 local EMCY service，并调用 `clear()` 清空 B06-owned error stack；Lely service 随后发送标准 `0x0000` error-reset/no-error EMCY。这个扩展不暴露任意 CAN frame 发送能力。
+Lely `AsyncMaster::Error(0, ...)` 不产生 recovery。工程通过 `CanopenTestMaster` 为 B06 暴露 local EMCY access，在 Lely master 锁内访问现有 local EMCY service，并调用 `clear()` 清空 B06-owned error stack；Lely service 随后发送标准 `0x0000` error-reset/no-error EMCY。这个扩展不暴露任意 CAN frame 发送能力。
 
 ## 5. Test vectors
 

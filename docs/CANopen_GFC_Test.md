@@ -8,7 +8,7 @@ B09G 验证 CANopenNode Global Fail-safe Command (GFC) 的协议功能。测试�
 
 ## 2. Host / MCU 分工
 
-Host 继续使用现有 Lely `EmcyTestMaster`/`AsyncMaster` 执行 SDO、NMT 和 Boot 控制。由于 Lely CANopen 高层 API 没有 GFC service，B09G 在同一个 `can1` 上额外创建一个独立 `lely::io::CanChannel`，只用于 CAN-ID `0x001` 的固定注入和捕获。
+Host 继续使用现有 Lely `CanopenTestMaster`/`AsyncMaster` 执行 SDO、NMT 和 Boot 控制。由于 Lely CANopen 高层 API 没有 GFC service，B09G 在同一个 `can1` 上额外创建一个独立 `lely::io::CanChannel`，只用于 CAN-ID `0x001` 的固定注入和捕获。
 
 两个 channel 的职责固定为：
 

@@ -153,7 +153,7 @@ bool readRemoteDiagnostic(lely::canopen::AsyncMaster& master,
 /**
  * @brief Check the Host EMCY producer configuration and require no active local EMCY.
  */
-bool validateProducerPreflight(EmcyTestMaster& master)
+bool validateProducerPreflight(CanopenTestMaster& master)
 {
     std::uint32_t cob_id = 0;
     std::uint16_t inhibit_time = 0;
@@ -402,7 +402,7 @@ bool validateResetPreservedSnapshot(const EmcyConsumerSnapshot& before,
 /**
  * @brief Emit one nonzero EMCY through the existing Host Lely producer.
  */
-bool emitTestEmcy(EmcyTestMaster& master,
+bool emitTestEmcy(CanopenTestMaster& master,
                   EmcyConsumerRuntimeState& state,
                   const EmcyTestVector& vector)
 {
@@ -437,7 +437,7 @@ bool emitTestEmcy(EmcyTestMaster& master,
 /**
  * @brief Clear the Host Lely EMCY stack and emit standard recovery when active.
  */
-bool clearLocalEmcy(EmcyTestMaster& master,
+bool clearLocalEmcy(CanopenTestMaster& master,
                     EmcyConsumerRuntimeState& state)
 {
     std::uint8_t history_count = 0;
@@ -490,7 +490,7 @@ bool clearLocalEmcy(EmcyTestMaster& master,
 /**
  * @brief Emit one vector and require one coherent matching MCU publication.
  */
-bool emitAndValidateVector(EmcyTestMaster& master,
+bool emitAndValidateVector(CanopenTestMaster& master,
                            EmcyConsumerRuntimeState& state,
                            EmcyConsumerSnapshot& current,
                            const EmcyTestVector& vector,
@@ -523,7 +523,7 @@ bool emitAndValidateVector(EmcyTestMaster& master,
 /**
  * @brief Clear active Host errors and require one matching recovery callback.
  */
-bool clearAndValidateRecovery(EmcyTestMaster& master,
+bool clearAndValidateRecovery(CanopenTestMaster& master,
                               EmcyConsumerRuntimeState& state,
                               EmcyConsumerSnapshot& current,
                               const char* phase)
@@ -576,7 +576,7 @@ bool validateSdoHealth(lely::canopen::AsyncMaster& master)
 /**
  * @brief Reset MCU communication and prove the EMCY callback is rebound.
  */
-bool validateResetRebind(EmcyTestMaster& master,
+bool validateResetRebind(CanopenTestMaster& master,
                          EmcyConsumerRuntimeState& state,
                          EmcyConsumerSnapshot& current)
 {
@@ -650,7 +650,7 @@ bool validateResetRebind(EmcyTestMaster& master,
 /**
  * @brief Run all first-version B06 protocol checks after preflight.
  */
-bool runEmcyConsumerValidation(EmcyTestMaster& master,
+bool runEmcyConsumerValidation(CanopenTestMaster& master,
                                EmcyConsumerRuntimeState& state)
 {
     EmcyConsumerSnapshot current;
@@ -692,7 +692,7 @@ bool runEmcyConsumerValidation(EmcyTestMaster& master,
 /**
  * @brief Restore B06-owned Host/MCU state after success or failure.
  */
-bool cleanupEmcyConsumerValidation(EmcyTestMaster& master,
+bool cleanupEmcyConsumerValidation(CanopenTestMaster& master,
                                    EmcyConsumerRuntimeState& state)
 {
     bool result = true;
@@ -720,7 +720,7 @@ bool cleanupEmcyConsumerValidation(EmcyTestMaster& master,
 
 } // namespace
 
-int emcyConsumerProcess(EmcyTestMaster& master)
+int emcyConsumerProcess(CanopenTestMaster& master)
 {
     if (!validateProducerPreflight(master)) {
         return 1;

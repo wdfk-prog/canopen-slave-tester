@@ -1,6 +1,6 @@
 /**
  * @file
- * @brief Narrow AsyncMaster access shim for local test services.
+ * @brief Narrow AsyncMaster access shim for test-only protected services.
  */
 
 #ifndef CANOPEN_MASTER_H
@@ -18,15 +18,16 @@
 class HostSdoServerFixture;
 
 /**
- * @brief Test master with narrow access to Lely local services.
+ * @brief Test master with narrow access to Lely protected services.
  *
  * Lely's high-level AsyncMaster::Error() does not expose the return value from
  * the underlying local EMCY push operation, and the coapp API does not expose
  * the clear operation required to emit a standard error-reset message. This
- * shim exposes only the local services required by B06 and J04 fixtures; it
- * does not implement a second CANopen protocol path.
+ * shim exposes only protected services required by the test fixtures and
+ * protocol fault-injection cases; it does not implement a second CANopen
+ * protocol path.
  */
-class EmcyTestMaster final : public lely::canopen::AsyncMaster {
+class CanopenTestMaster final : public lely::canopen::AsyncMaster {
 public:
     using lely::canopen::AsyncMaster::AsyncMaster;
 
@@ -130,6 +131,33 @@ public:
         std::lock_guard<lely::util::BasicLockable> lock(*this);
         lely::COEmcy* const emcy = localEmcyService();
         return emcy != nullptr ? emcy->clear() : -1;
+    }
+
+    /**
+     * @brief Abort the active/queued Client-SDO requests for one remote node.
+     *
+     * This exposes the protected Lely Client-SDO queue operation required by
+     * B02-08. The caller must ensure no unrelated SDO request for the same node
+     * is active because Lely applies the abort code to the complete per-node
+     * queue. CancelAll() does not count the stopped ongoing request in its return
+     * value, so the request completion callback is the authoritative abort result.
+     *
+     * @param node_id Remote SDO server node-ID.
+     * @param abort_code SDO abort code sent for the cancellation.
+     * @return true when the remote Client-SDO service exists and cancellation
+     *         was requested; otherwise false.
+     */
+    bool cancelRemoteSdoRequests(
+        std::uint8_t node_id, lely::canopen::SdoErrc abort_code)
+    {
+        std::lock_guard<lely::util::BasicLockable> lock(*this);
+        lely::canopen::Sdo* const sdo = GetSdo(node_id);
+        if (sdo == nullptr) {
+            return false;
+        }
+
+        (void)sdo->CancelAll(abort_code);
+        return true;
     }
 
 private:

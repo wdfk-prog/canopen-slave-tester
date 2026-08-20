@@ -251,4 +251,194 @@ SdoOperationResult writeRemoteSdo(
     return SdoOperationResult::SUCCESS;
 }
 
+/**
+ * @brief Read one remote object using an explicit SDO block upload.
+ *
+ * SubmitBlockRead() remains asynchronous on the Lely executor. This helper
+ * blocks only the caller/process thread while the event-loop thread completes
+ * the protocol transaction.
+ *
+ * @tparam T CANopen object value type accepted by Lely SubmitBlockRead().
+ * @param master Active Lely asynchronous CANopen master.
+ * @param node_id Remote node-ID whose SDO server is accessed.
+ * @param index Remote object dictionary index.
+ * @param subindex Remote object dictionary sub-index.
+ * @param value Receives the uploaded value only on SUCCESS.
+ * @param sdo_timeout Protocol-level timeout passed to Lely.
+ * @param completion_margin Extra local wait after protocol timeout.
+ * @param completion_error Optional Lely submission/completion error. It remains
+ *        clear for a local WAIT_TIMEOUT because no completion was observed.
+ * @return Operation result including protocol and local completion timeouts.
+ */
+template <class T>
+SdoOperationResult readRemoteBlockSdo(
+    lely::canopen::AsyncMaster& master, std::uint8_t node_id,
+    std::uint16_t index, std::uint8_t subindex, T& value,
+    std::chrono::milliseconds sdo_timeout =
+        std::chrono::milliseconds(CANOPEN_SDO_TIMEOUT_MS),
+    std::chrono::milliseconds completion_margin =
+        std::chrono::milliseconds(CANOPEN_SDO_COMPLETION_MARGIN_MS),
+    std::error_code* completion_error = nullptr)
+{
+    const auto state = std::make_shared<canopen_sdo_detail::ReadState<T>>();
+    std::error_code submit_error;
+
+    if (completion_error != nullptr) {
+        completion_error->clear();
+    }
+
+    master.SubmitBlockRead<T>(
+        master.GetExecutor(), node_id, index, subindex,
+        [state](std::uint8_t, std::uint16_t, std::uint8_t,
+                std::error_code error, T read_value) noexcept {
+            {
+                std::lock_guard<std::mutex> lock(state->mutex);
+                state->completed = true;
+                state->error = error;
+                state->value = read_value;
+            }
+            state->condition.notify_all();
+        },
+        sdo_timeout, submit_error);
+
+    if (submit_error) {
+        if (completion_error != nullptr) {
+            *completion_error = submit_error;
+        }
+        spdlog::error(
+            "Unable to submit block SDO read: node={} object=0x{:04x}:{:02x}: {}",
+            static_cast<unsigned int>(node_id), index,
+            static_cast<unsigned int>(subindex), submit_error.message());
+        return SdoOperationResult::FAILED;
+    }
+
+    std::unique_lock<std::mutex> lock(state->mutex);
+    if (!state->condition.wait_for(
+            lock, sdo_timeout + completion_margin,
+            [state]() { return state->completed; })) {
+        spdlog::error(
+            "Block SDO read completion timed out: node={} object=0x{:04x}:{:02x}; "
+            "remote transaction state is unknown",
+            static_cast<unsigned int>(node_id), index,
+            static_cast<unsigned int>(subindex));
+        return SdoOperationResult::WAIT_TIMEOUT;
+    }
+
+    if (completion_error != nullptr) {
+        *completion_error = state->error;
+    }
+    if (state->error) {
+        if (lely::canopen::sdo_errc(state->error)
+            == lely::canopen::SdoErrc::TIMEOUT) {
+            spdlog::error(
+                "Block SDO read timed out: node={} object=0x{:04x}:{:02x}: {}",
+                static_cast<unsigned int>(node_id), index,
+                static_cast<unsigned int>(subindex), state->error.message());
+            return SdoOperationResult::SDO_TIMEOUT;
+        }
+        spdlog::error(
+            "Block SDO read failed: node={} object=0x{:04x}:{:02x}: {}",
+            static_cast<unsigned int>(node_id), index,
+            static_cast<unsigned int>(subindex), state->error.message());
+        return SdoOperationResult::FAILED;
+    }
+
+    value = state->value;
+    return SdoOperationResult::SUCCESS;
+}
+
+/**
+ * @brief Write one remote object using an explicit SDO block download.
+ *
+ * SubmitBlockWrite() remains asynchronous on the Lely executor. This helper
+ * blocks only the caller/process thread while the event-loop thread completes
+ * the protocol transaction.
+ *
+ * @tparam T CANopen object value type accepted by Lely SubmitBlockWrite().
+ * @param master Active Lely asynchronous CANopen master.
+ * @param node_id Remote node-ID whose SDO server is accessed.
+ * @param index Remote object dictionary index.
+ * @param subindex Remote object dictionary sub-index.
+ * @param value Value downloaded to the remote object.
+ * @param sdo_timeout Protocol-level timeout passed to Lely.
+ * @param completion_margin Extra local wait after protocol timeout.
+ * @param completion_error Optional Lely submission/completion error. It remains
+ *        clear for a local WAIT_TIMEOUT because no completion was observed.
+ * @return Operation result including protocol and local completion timeouts.
+ */
+template <class T>
+SdoOperationResult writeRemoteBlockSdo(
+    lely::canopen::AsyncMaster& master, std::uint8_t node_id,
+    std::uint16_t index, std::uint8_t subindex, T value,
+    std::chrono::milliseconds sdo_timeout =
+        std::chrono::milliseconds(CANOPEN_SDO_TIMEOUT_MS),
+    std::chrono::milliseconds completion_margin =
+        std::chrono::milliseconds(CANOPEN_SDO_COMPLETION_MARGIN_MS),
+    std::error_code* completion_error = nullptr)
+{
+    const auto state = std::make_shared<canopen_sdo_detail::WriteState>();
+    std::error_code submit_error;
+
+    if (completion_error != nullptr) {
+        completion_error->clear();
+    }
+
+    master.SubmitBlockWrite(
+        master.GetExecutor(), node_id, index, subindex, value,
+        [state](std::uint8_t, std::uint16_t, std::uint8_t,
+                std::error_code error) noexcept {
+            {
+                std::lock_guard<std::mutex> lock(state->mutex);
+                state->completed = true;
+                state->error = error;
+            }
+            state->condition.notify_all();
+        },
+        sdo_timeout, submit_error);
+
+    if (submit_error) {
+        if (completion_error != nullptr) {
+            *completion_error = submit_error;
+        }
+        spdlog::error(
+            "Unable to submit block SDO write: node={} object=0x{:04x}:{:02x}: {}",
+            static_cast<unsigned int>(node_id), index,
+            static_cast<unsigned int>(subindex), submit_error.message());
+        return SdoOperationResult::FAILED;
+    }
+
+    std::unique_lock<std::mutex> lock(state->mutex);
+    if (!state->condition.wait_for(
+            lock, sdo_timeout + completion_margin,
+            [state]() { return state->completed; })) {
+        spdlog::error(
+            "Block SDO write completion timed out: node={} object=0x{:04x}:{:02x}; "
+            "remote transaction state is unknown",
+            static_cast<unsigned int>(node_id), index,
+            static_cast<unsigned int>(subindex));
+        return SdoOperationResult::WAIT_TIMEOUT;
+    }
+
+    if (completion_error != nullptr) {
+        *completion_error = state->error;
+    }
+    if (state->error) {
+        if (lely::canopen::sdo_errc(state->error)
+            == lely::canopen::SdoErrc::TIMEOUT) {
+            spdlog::error(
+                "Block SDO write timed out: node={} object=0x{:04x}:{:02x}: {}",
+                static_cast<unsigned int>(node_id), index,
+                static_cast<unsigned int>(subindex), state->error.message());
+            return SdoOperationResult::SDO_TIMEOUT;
+        }
+        spdlog::error(
+            "Block SDO write failed: node={} object=0x{:04x}:{:02x}: {}",
+            static_cast<unsigned int>(node_id), index,
+            static_cast<unsigned int>(subindex), state->error.message());
+        return SdoOperationResult::FAILED;
+    }
+
+    return SdoOperationResult::SUCCESS;
+}
+
 #endif /* CANOPEN_SDO_H */

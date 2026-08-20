@@ -150,6 +150,7 @@ Host 角色直接通过 `include/canopen_config.h` 中的一个编译期宏选�
 | `include/canopen_sdo.h` | `CANOPEN_SDO_TIMEOUT_MS` | `5000` | 公共远端 SDO helper 传给 Lely 的协议级 timeout |
 | `include/canopen_sdo.h` | `CANOPEN_SDO_COMPLETION_MARGIN_MS` | `500` | SDO 协议 timeout 后额外等待 completion callback 的本地余量 |
 | `include/nmt_heartbeat.h` | `CANOPEN_ENABLE_HEARTBEAT_PROCESS` | `0` | 当前不注册 A01 Heartbeat |
+| `include/sdo_block_process.h` | `CANOPEN_ENABLE_SDO_BLOCK_PROCESS` | `1` | 注册并执行 J06/B02 SDO Server Block |
 | `include/sdo_process.h` | `CANOPEN_ENABLE_SDO_PROCESS` | `0` | 当前不注册 A02 SDO |
 | `include/pdo_process.h` | `CANOPEN_ENABLE_PDO_PROCESS` | `0` | 当前不注册 A03 RPDO/TPDO |
 | `include/sync_pdo_process.h` | `CANOPEN_ENABLE_SYNC_PDO_PROCESS` | `0` | 当前不注册 A04 SYNC/同步 TPDO |
@@ -157,6 +158,8 @@ Host 角色直接通过 `include/canopen_config.h` 中的一个编译期宏选�
 | `include/emcy_process.h` | `CANOPEN_ENABLE_EMCY_PROCESS` | `1` | 注册并执行 A06 EMCY Producer 测试 |
 | `include/emcy_consumer_process.h` | `CANOPEN_ENABLE_EMCY_CONSUMER_PROCESS` | `1` | 注册并执行 B06 MCU EMCY Consumer 测试 |
 | `include/gfc_process.h` | `CANOPEN_ENABLE_GFC_PROCESS` | `1` | 注册并执行 J03/B09G GFC consumer/producer 测试 |
+| `include/sdo_client_process.h` | `CANOPEN_ENABLE_SDO_CLIENT_PROCESS` | `1` | 注册并执行 J04/B03 MCU SDO Client |
+| `include/sdo_client_process.h` | `CANOPEN_ENABLE_SDO_CLIENT_BLOCK_REGRESSION` | `0` | J06/B02-12 条件回归；仅在 `CANOPEN_ENABLE_SDO_CLIENT_PROCESS=1` 时有效；MCU 需 `PKG_CANOPENNODE_DEMO_SDO_CLIENT_TEST=y` + `PKG_CANOPENNODE_SDO_CLI_BLOCK=y` |
 | `include/nmt_master_process.h` | `CANOPEN_ENABLE_NMT_MASTER_PROCESS` | `1` | Slave 角色执行 MCU NMT Master 行为验证 |
 | `include/shutdown_process.h` | `CANOPEN_ENABLE_FINAL_RESET_PROCESS` | `1` | 退出时执行 Reset Communication |
 
@@ -164,6 +167,7 @@ Host 角色直接通过 `include/canopen_config.h` 中的一个编译期宏选�
 
 ```text
 A01  src/nmt_heartbeat.cpp
+J06/B02 src/sdo_block_process.cpp
 A02  src/sdo_process.cpp
 A03  src/pdo_process.cpp
 A04  src/sync_pdo_process.cpp
@@ -171,6 +175,7 @@ A05  src/time_process.cpp
 A06  src/emcy_process.cpp
 B06  src/emcy_consumer_process.cpp
 B09G src/gfc_process.cpp
+J04/B03 src/sdo_client_process.cpp
 ```
 
 A01 当前使用 `kHeartbeatIndex=0x1017`、`kHeartbeatTimeoutMs=3000`、`kHeartbeatSampleCount=5` 和 500 ms Producer Heartbeat 周期。A02 使用 `kTestObjectIndex=0x2200`、`kProbeValue=0x12345678`，并在 probe 与原值相同时选择备用值。A03 的 PDO number、`0x2100/0x2101/0x2200`、采样策略和时序容差全部保存在 `pdo_process.cpp`；A04 的 SYNC 周期、样本数量、TPDO1 参数索引和时序窗口保存在 `sync_pdo_process.cpp`；A05 的 `0x1012/0x2300`、TIME 边界值、诊断轮询和时序容差保存在 `time_process.cpp`；B06 的 `0x2301`、EMCY vectors、500 ms SDO timeout、2 s 观察窗口和 snapshot 重试次数都保存在 `emcy_consumer_process.cpp`。B09G 的 `0x1300/0x2302`、固定 CAN-ID `0x001`、负向观察窗口和 wire timeout 都保存在 `gfc_process.cpp`。
@@ -183,6 +188,7 @@ A01 当前使用 `kHeartbeatIndex=0x1017`、`kHeartbeatTimeoutMs=3000`、`kHeart
 
 ```text
 A01 Heartbeat
+B02 SDO Server Block
 A02 SDO
 A03 PDO
 A04 SYNC PDO
@@ -190,6 +196,7 @@ A05 TIME  (按对应宏决定是否注册)
 A06 EMCY
 B06 EMCY Consumer
 B09G GFC
+B03 MCU SDO Client
 ```
 
 各 `CANOPEN_ENABLE_*_PROCESS` 宏位于对应流程头文件；值为 `1` 时进入注册表，为 `0` 时不注册。流程采用 fail-fast：任一流程返回非零后，后续流程不再执行。

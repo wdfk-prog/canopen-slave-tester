@@ -12,7 +12,7 @@
 #include <cstdint>
 #include <vector>
 
-class EmcyTestMaster;
+class CanopenTestMaster;
 /**
  * @brief Own test-only Object Dictionary entries served by the master SSDO.
  *
@@ -42,7 +42,7 @@ public:
      *
      * @param master Active Host CANopen master.
      */
-    explicit HostSdoServerFixture(EmcyTestMaster& master) noexcept;
+    explicit HostSdoServerFixture(CanopenTestMaster& master) noexcept;
 
     /** @brief Remove all fixture objects if they are still installed. */
     ~HostSdoServerFixture();
@@ -98,7 +98,7 @@ private:
     bool createOctetObject(co_obj_t*& object) noexcept;
     void uninstallLocked() noexcept;
 
-    EmcyTestMaster& master_; /**< Master whose local OD serves the objects. */
+    CanopenTestMaster& master_; /**< Master whose local OD serves the objects. */
     co_obj_t* u32_object_ = nullptr; /**< Owned 0x2F00 object, if installed. */
     co_obj_t* octets_object_ = nullptr; /**< Owned 0x2F01 object, if installed. */
     co_obj_t* readonly_object_ = nullptr; /**< Owned 0x2F02 object, if installed. */

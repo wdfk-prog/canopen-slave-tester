@@ -15,7 +15,7 @@ class CanChannel;
 } // namespace io
 } // namespace lely
 
-class EmcyTestMaster;
+class CanopenTestMaster;
 
 /**
  * @brief Validate MCU GFC consumer/producer behavior with a dedicated wire channel.
@@ -28,6 +28,6 @@ class EmcyTestMaster;
  * @param wire_channel Dedicated CAN channel used only by the GFC stage fixture.
  * @return Zero on success; otherwise a non-zero process result.
  */
-int gfcProcess(EmcyTestMaster& master, lely::io::CanChannel& wire_channel);
+int gfcProcess(CanopenTestMaster& master, lely::io::CanChannel& wire_channel);
 
 #endif /* GFC_PROCESS_H */

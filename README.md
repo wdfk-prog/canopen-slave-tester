@@ -47,7 +47,7 @@ Startup Boot
    → 设置 0x1015=15000，按单调时间戳验证 1.5 s inhibit
    → 恢复 0x1014/0x1015/0x1028/主站 Heartbeat 并执行原 COB-ID smoke test
 → B06 EMCY Consumer
-   → Host Node 127 通过 `EmcyTestMaster::pushLocalEmcy()` 发送确定性 EMCY
+   → Host Node 127 通过 `CanopenTestMaster::pushLocalEmcy()` 发送确定性 EMCY
    → 通过 MCU 0x2301 诊断记录验证 source/COB-ID/EEC/ER/errorBit/infoCode
    → 重复 EMCY 必须逐帧增加 remote_rx_count
    → 通过 Lely 本地 EMCY clear 发送标准 0x0000 recovery
@@ -91,7 +91,7 @@ include/pdo_process.h              A03 接口
 include/sync_pdo_process.h         A04 接口
 include/time_process.h             A05 TIME consumer 接口
 include/canopen_emcy.h              共享 EMCY event observer
-include/canopen_master.h            B06-only Lely local EMCY test shim
+include/canopen_master.h            test-only Lely protected-service access shim
 include/emcy_process.h              A06 EMCY producer 接口
 include/emcy_consumer_process.h     B06 EMCY consumer 接口
 include/gfc_process.h               J03/B09G GFC 接口

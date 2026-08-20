@@ -39,7 +39,7 @@ constexpr std::uint8_t kSubIndexSub = 0x05U;
 constexpr std::uint8_t kPayloadSizeSub = 0x06U;
 /** U32 probe value or deterministic segmented payload seed. */
 constexpr std::uint8_t kProbeValueSub = 0x07U;
-/** J04 request flags; block-transfer bit remains disabled. */
+/** J04/J06 request flags. */
 constexpr std::uint8_t kFlagsSub = 0x08U;
 /** Sequence accepted by the MCU mainline. */
 constexpr std::uint8_t kActiveSeqSub = 0x09U;
@@ -68,14 +68,20 @@ constexpr std::uint8_t kMissingNodeId = 126U;
 constexpr std::uint8_t kUploadCommand = 1U;
 /** Second SDO Client operation command value. */
 constexpr std::uint8_t kDownloadCommand = 2U;
-/** B03 uses only segmented/expedited mode; all block flags remain clear. */
+/** J04/B03 segmented/expedited requests keep all optional flags clear. */
 constexpr std::uint8_t kNoFlags = 0U;
+/** J06/B02-12 requests CANopenNode SDO Client block transfer. */
+constexpr std::uint8_t kBlockFlag = 0x01U;
 /** U32 payload length. */
 constexpr std::uint32_t kU32Size = 4U;
 /** Payload larger than both expedited data and the configured 32-byte FIFO. */
 constexpr std::uint32_t kSegmentedSize = 48U;
 /** Deterministic segmented pattern seed. */
 constexpr std::uint32_t kSegmentedSeed = 0xA1B2C3D4U;
+/** B02-12 block payload size served by the Host fixture. */
+constexpr std::uint32_t kBlockRegressionSize = 2048U;
+/** Deterministic B02-12 block payload seed. */
+constexpr std::uint32_t kBlockRegressionSeed = 0xB0212C3DU;
 /** Primary reversible U32 probe. */
 constexpr std::uint32_t kProbeValue = 0x12345678U;
 /** Alternate value used when the saved value equals the primary probe. */
@@ -109,7 +115,7 @@ enum class McuSdoClientResult : std::int32_t {
     TIMEOUT = 3, /**< SDO Client ended with CO_SDO_AB_TIMEOUT. */
     RESET_CANCELLED = 4, /**< Communication reset cancelled the active request. */
     SETUP_ERROR = 5, /**< Request could not initialize the native client. */
-    UNSUPPORTED = 6, /**< Request uses an intentionally unsupported J04 option. */
+    UNSUPPORTED = 6, /**< Request uses an unavailable or unsupported test option. */
     INTERNAL_ERROR = 7, /**< Wrapper observed an inconsistent transfer result. */
 };
 
@@ -121,7 +127,7 @@ struct ClientRequest {
     std::uint8_t subindex = 0U; /**< Target OD sub-index. */
     std::uint32_t payload_size = 0U; /**< DOWNLOAD byte count. */
     std::uint32_t probe_value = 0U; /**< U32 value or payload seed. */
-    std::uint8_t flags = kNoFlags; /**< J04 requires all flags clear. */
+    std::uint8_t flags = kNoFlags; /**< Optional request-mode flags. */
 };
 
 /** Coherent terminal status read from the MCU control record. */
@@ -144,14 +150,20 @@ std::uint8_t patternByte(std::uint32_t seed, std::uint32_t offset) noexcept
                                      ^ static_cast<std::uint8_t>(offset));
 }
 
-/** Build the 48-byte segmented fixture payload. */
-std::vector<std::uint8_t> makeSegmentedPayload(std::uint32_t seed)
+/** Build one deterministic fixture payload. */
+std::vector<std::uint8_t> makePayload(std::uint32_t size, std::uint32_t seed)
 {
-    std::vector<std::uint8_t> data(kSegmentedSize);
-    for (std::uint32_t i = 0U; i < kSegmentedSize; ++i) {
+    std::vector<std::uint8_t> data(size);
+    for (std::uint32_t i = 0U; i < size; ++i) {
         data[i] = patternByte(seed, i);
     }
     return data;
+}
+
+/** Build the 48-byte segmented fixture payload. */
+std::vector<std::uint8_t> makeSegmentedPayload(std::uint32_t seed)
+{
+    return makePayload(kSegmentedSize, seed);
 }
 
 /** Calculate the checksum reported by the MCU for one payload. */
@@ -167,7 +179,7 @@ std::uint32_t checksum(const std::vector<std::uint8_t>& data) noexcept
 
 /** Read one typed field from the MCU 0x2303 record. */
 template <class T>
-bool readControl(EmcyTestMaster& master, std::uint8_t subindex, T& value)
+bool readControl(CanopenTestMaster& master, std::uint8_t subindex, T& value)
 {
     return readRemoteSdo<T>(master, CANOPEN_SLAVE_NODE_ID, kControlIndex,
                             subindex, value) == SdoOperationResult::SUCCESS;
@@ -175,14 +187,14 @@ bool readControl(EmcyTestMaster& master, std::uint8_t subindex, T& value)
 
 /** Write one typed request field to the MCU 0x2303 record. */
 template <class T>
-bool writeControl(EmcyTestMaster& master, std::uint8_t subindex, T value)
+bool writeControl(CanopenTestMaster& master, std::uint8_t subindex, T value)
 {
     return writeRemoteSdo<T>(master, CANOPEN_SLAVE_NODE_ID, kControlIndex,
                              subindex, value) == SdoOperationResult::SUCCESS;
 }
 
 /** Allocate a new nonzero request sequence from the current MCU record. */
-bool nextRequestSequence(EmcyTestMaster& master, std::uint32_t& sequence)
+bool nextRequestSequence(CanopenTestMaster& master, std::uint32_t& sequence)
 {
     if (!readControl(master, kRequestSeqSub, sequence)) {
         return false;
@@ -195,7 +207,7 @@ bool nextRequestSequence(EmcyTestMaster& master, std::uint32_t& sequence)
 }
 
 /** Write immutable request fields, committing request_seq last. */
-bool submitRequest(EmcyTestMaster& master, const ClientRequest& request,
+bool submitRequest(CanopenTestMaster& master, const ClientRequest& request,
                    std::uint32_t sequence)
 {
     if (!writeControl(master, kCommandSub, request.command)
@@ -219,7 +231,7 @@ bool submitRequest(EmcyTestMaster& master, const ClientRequest& request,
 }
 
 /** Read a result snapshot guarded by complete_seq before and after fields. */
-bool readStatus(EmcyTestMaster& master, ClientStatus& status)
+bool readStatus(CanopenTestMaster& master, ClientStatus& status)
 {
     for (unsigned int attempt = 0U; attempt < 3U; ++attempt) {
         std::uint32_t complete_before = 0U;
@@ -249,7 +261,7 @@ bool readStatus(EmcyTestMaster& master, ClientStatus& status)
 }
 
 /** Poll one U32 control field until it equals the committed sequence. */
-bool waitSequence(EmcyTestMaster& master, std::uint8_t subindex,
+bool waitSequence(CanopenTestMaster& master, std::uint8_t subindex,
                   std::uint32_t sequence, std::uint32_t timeout_ms)
 {
     const auto deadline = std::chrono::steady_clock::now()
@@ -270,7 +282,7 @@ bool waitSequence(EmcyTestMaster& master, std::uint8_t subindex,
 }
 
 /** Wait until the request is accepted but has not yet completed. */
-bool waitActivePending(EmcyTestMaster& master, std::uint32_t sequence,
+bool waitActivePending(CanopenTestMaster& master, std::uint32_t sequence,
                        std::uint32_t timeout_ms)
 {
     const auto deadline = std::chrono::steady_clock::now()
@@ -296,7 +308,7 @@ bool waitActivePending(EmcyTestMaster& master, std::uint32_t sequence,
 }
 
 /** Submit one request and wait for its terminal snapshot. */
-bool runTransaction(EmcyTestMaster& master, const ClientRequest& request,
+bool runTransaction(CanopenTestMaster& master, const ClientRequest& request,
                     ClientStatus& status, std::uint32_t& sequence)
 {
     if (!nextRequestSequence(master, sequence)
@@ -350,7 +362,7 @@ bool expectFailure(const char* case_id, const ClientStatus& status,
 }
 
 /** Verify the timeout-test Node-ID has no SDO server response. */
-bool verifyMissingNodePrecondition(EmcyTestMaster& master)
+bool verifyMissingNodePrecondition(CanopenTestMaster& master)
 {
     std::uint32_t device_type = 0U;
     const SdoOperationResult result = readRemoteSdo<std::uint32_t>(
@@ -380,7 +392,7 @@ bool verifyMissingNodePrecondition(EmcyTestMaster& master)
 }
 
 /** Restore MCU 0x2200 independently through its Server-SDO and verify it. */
-bool restoreLocalControl(EmcyTestMaster& master, std::uint32_t original)
+bool restoreLocalControl(CanopenTestMaster& master, std::uint32_t original)
 {
     if (writeRemoteSdo<std::uint32_t>(
             master, CANOPEN_SLAVE_NODE_ID, kLocalControlIndex, 0U, original)
@@ -426,7 +438,7 @@ bool restoreFixtureOctets(HostSdoServerFixture& fixture,
 
 } // namespace
 
-int sdoClientProcess(EmcyTestMaster& master)
+int sdoClientProcess(CanopenTestMaster& master)
 {
     static_assert(kMissingNodeId != CANOPEN_MASTER_NODE_ID,
                   "B03 timeout node must not be the Host master");
@@ -677,6 +689,98 @@ int sdoClientProcess(EmcyTestMaster& master)
         || !expectU32Success("B03-11 reset recovery", status, remote_u32)) {
         return 1;
     }
+
+#if CANOPEN_ENABLE_SDO_CLIENT_BLOCK_REGRESSION
+    /* B02-12: MCU block upload from the Host SSDO fixture. This gate is
+     * intentionally separate from J04 so flags=0 behavior remains unchanged. */
+    std::vector<std::uint8_t> block_original;
+    const std::vector<std::uint8_t> block_payload =
+        makePayload(kBlockRegressionSize, kBlockRegressionSeed);
+    if (!fixture.readOctets(block_original)) {
+        return 1;
+    }
+    if (!fixture.writeOctets(block_payload)) {
+        if (!restoreFixtureOctets(fixture, block_original)) {
+            spdlog::error("B02-12 upload setup cleanup verification failed");
+        }
+        return 1;
+    }
+    request = {kUploadCommand, CANOPEN_MASTER_NODE_ID,
+               HostSdoServerFixture::kOctetsIndex,
+               HostSdoServerFixture::kSubindex, 0U, 0U, kBlockFlag};
+    const bool block_upload_transaction_ok =
+        runTransaction(master, request, status, sequence);
+    const bool block_upload_ok = block_upload_transaction_ok
+        && status.result == static_cast<std::int32_t>(McuSdoClientResult::SUCCESS)
+        && status.abort_code == 0U
+        && status.transferred_size == kBlockRegressionSize
+        && status.checksum == checksum(block_payload);
+    if (!restoreFixtureOctets(fixture, block_original)) {
+        return 1;
+    }
+    if (!block_upload_ok) {
+        spdlog::error("B02-12 MCU block upload failed");
+        return 1;
+    }
+    spdlog::info("B02-12 MCU block upload passed");
+
+    /* B02-12: MCU block download to the Host SSDO fixture and independent
+     * byte-for-byte verification through the local object API. */
+    if (!fixture.readOctets(block_original)) {
+        return 1;
+    }
+    request = {kDownloadCommand, CANOPEN_MASTER_NODE_ID,
+               HostSdoServerFixture::kOctetsIndex,
+               HostSdoServerFixture::kSubindex, kBlockRegressionSize,
+               kBlockRegressionSeed, kBlockFlag};
+    const bool block_download_transaction_ok =
+        runTransaction(master, request, status, sequence);
+    std::vector<std::uint8_t> block_downloaded;
+    const bool block_download_ok = block_download_transaction_ok
+        && status.result == static_cast<std::int32_t>(McuSdoClientResult::SUCCESS)
+        && status.abort_code == 0U
+        && status.transferred_size == kBlockRegressionSize
+        && status.checksum == checksum(block_payload)
+        && fixture.readOctets(block_downloaded)
+        && block_downloaded == block_payload;
+    if (!restoreFixtureOctets(fixture, block_original)) {
+        return 1;
+    }
+    if (!block_download_ok) {
+        spdlog::error("B02-12 MCU block download failed");
+        return 1;
+    }
+    spdlog::info("B02-12 MCU block download passed");
+
+    /* Re-run one ordinary segmented upload after block mode to prove that the
+     * original J04 path remains usable on the same SDO client instance. */
+    if (!fixture.readOctets(block_original)
+        || !fixture.writeOctets(segmented)) {
+        if (!block_original.empty()
+            && !restoreFixtureOctets(fixture, block_original)) {
+            spdlog::error("B02-12 segmented-regression setup cleanup failed");
+        }
+        return 1;
+    }
+    request = {kUploadCommand, CANOPEN_MASTER_NODE_ID,
+               HostSdoServerFixture::kOctetsIndex,
+               HostSdoServerFixture::kSubindex, 0U, 0U, kNoFlags};
+    const bool post_block_segmented_transaction_ok =
+        runTransaction(master, request, status, sequence);
+    const bool post_block_segmented_ok = post_block_segmented_transaction_ok
+        && status.result == static_cast<std::int32_t>(McuSdoClientResult::SUCCESS)
+        && status.abort_code == 0U
+        && status.transferred_size == kSegmentedSize
+        && status.checksum == checksum(segmented);
+    if (!restoreFixtureOctets(fixture, block_original)) {
+        return 1;
+    }
+    if (!post_block_segmented_ok) {
+        spdlog::error("B02-12 post-block segmented regression failed");
+        return 1;
+    }
+    spdlog::info("B02-12 post-block segmented regression passed");
+#endif /* CANOPEN_ENABLE_SDO_CLIENT_BLOCK_REGRESSION */
 
     spdlog::info("B03 MCU SDO Client validation passed");
     return 0;

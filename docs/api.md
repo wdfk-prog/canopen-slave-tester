@@ -70,6 +70,26 @@ int sdoProcess(
 
 A02 保存节点 1 的 `0x2200:00`，写入临时 probe value，通过 SDO 回读验证后恢复原值。`CANOPEN_ENABLE_SDO_PROCESS` 位于 `include/sdo_process.h`；测试对象和 probe value 是 `src/sdo_process.cpp` 的私有配置。
 
+## J06 / B02 SDO Server Block Transfer
+
+声明位置：`include/sdo_block_process.h`、`include/canopen_sdo.h`。
+
+```cpp
+int sdoBlockProcess(CanopenTestMaster& master);
+
+template <class T>
+SdoOperationResult readRemoteBlockSdo(...);
+
+template <class T>
+SdoOperationResult writeRemoteBlockSdo(...);
+```
+
+B02 直接使用 Lely `SubmitBlockRead()` / `SubmitBlockWrite()`，不实现第二套 SDO Block 状态机。测试对象为 MCU test-only `0x2304:00 DOMAIN`，覆盖 32、900、1024、1025、2048 bytes、read-only abort、Stopped timeout recovery、client abort recovery、block→expedited、block→segmented 和 100 次最大长度 round-trip。每次 run 先保存原 payload，只有 Client-SDO callback 状态和必要的 NMT 恢复状态都可确定时，才执行 block restore + read-back。`WAIT_TIMEOUT` 或远端 readiness 无法确认时，流程停止后续 SDO cleanup。
+
+`CanopenTestMaster::cancelRemoteSdoRequests()` 只负责受控暴露 Lely 的 protected per-node Client-SDO queue cancellation，供 B02-08 fault injection 使用。`CanopenTestMaster` 是通用测试 shim，不再以 EMCY 命名；B06 local EMCY、J04 Host Server-SDO fixture 和 B02 Client-SDO cancellation 都集中在这一层访问 Lely protected service，但不实现第二套协议。调用前必须保证同一 Node-ID 没有其他 SDO request。Lely `CancelAll()` 的返回计数不包含被停止的 ongoing request，因此 helper 只确认 Client-SDO service 存在并发起 cancellation；最终 completion callback 的 abort code 才是 transaction 结果判据。B02-08 在观察到 client abort completion 后，使用一次确认的 NMT Stop -> Pre-operational 状态切换作为远端 SDO readiness barrier，不使用固定 sleep，也不执行 communication reset。
+
+B02-12 位于现有 `sdoClientProcess()` 内，因为该回归复用 J04/B03 的 `0x2303` MCU SDO Client 控制/status contract 和 Host Node-127 Server-SDO fixture。实际执行要求 `CANOPEN_ENABLE_SDO_CLIENT_PROCESS=1` 且 `CANOPEN_ENABLE_SDO_CLIENT_BLOCK_REGRESSION=1`；头文件对该依赖进行编译期检查。MCU 侧要求 `PKG_CANOPENNODE_DEMO_SDO_CLIENT_TEST=y` 和 `PKG_CANOPENNODE_SDO_CLI_BLOCK=y`；前者会选择基础 SDO Client/segmented/local 支持，后者单独编译 block 能力。`PKG_CANOPENNODE_APP_SDO_CLI_BLOCK` 不是 B02-12 必需项，因为该测试由 `0x2303:08` bit0 对每次 request 显式选择 block。J04/B03 原 `flags=0` segmented/local 路径保持不变。
+
 ## A03 RPDO/TPDO
 
 声明位置：`include/pdo_process.h`。
@@ -136,18 +156,18 @@ A06 不写 `0x1016`。它读取从机 `0x1001/0x1003/0x1014/0x1015`，基础 EMC
 声明位置：`include/emcy_consumer_process.h`。B06 Host local EMCY 所需的最小 Lely 扩展位于 `include/canopen_master.h`。
 
 ```cpp
-int emcyConsumerProcess(EmcyTestMaster& master);
+int emcyConsumerProcess(CanopenTestMaster& master);
 
-class EmcyTestMaster : public lely::canopen::AsyncMaster;
+class CanopenTestMaster : public lely::canopen::AsyncMaster;
 ```
 
-B06 不使用 Host 共享 `OnEmcy()` observer。Host Node 127 通过 `EmcyTestMaster::pushLocalEmcy()` 发送非零 EMCY，MCU 通过 CANopenNode EMCY Consumer callback 更新只读 `0x2301:01..07`。Host 以 `remote_rx_count` 前读/后读相等作为多次 SDO snapshot 的一致性条件，并逐帧要求 count 精确 `+1`。
+B06 不使用 Host 共享 `OnEmcy()` observer。Host Node 127 通过 `CanopenTestMaster::pushLocalEmcy()` 发送非零 EMCY，MCU 通过 CANopenNode EMCY Consumer callback 更新只读 `0x2301:01..07`。Host 以 `remote_rx_count` 前读/后读相等作为多次 SDO snapshot 的一致性条件，并逐帧要求 count 精确 `+1`。
 
 `pushLocalEmcy()` 在 master 锁内调用现有 COEmcy::push() 并返回结果，只有确认 local EMCY 已入栈后才更新 host_error_active/expected_host_error_count。
 
-Master process table 使用绑定后的 callable，因此普通流程仍接收 `AsyncMaster&`，B06 可直接接收 `EmcyTestMaster&`；B09G 额外绑定独立 `CanChannel&`。所有流程仍由同一个 `canopenRunProcesses()` 统一记录 started/passed/failed 并 fail-fast。
+Master process table 使用绑定后的 callable，因此普通流程仍接收 `AsyncMaster&`，B06 可直接接收 `CanopenTestMaster&`；B09G 额外绑定独立 `CanChannel&`。所有流程仍由同一个 `canopenRunProcesses()` 统一记录 started/passed/failed 并 fail-fast。
 
-标准 recovery 不能通过 `AsyncMaster::Error(0)` 产生；`EmcyTestMaster` 是 B06-only access shim，只在 Lely master 锁内暴露现有 local EMCY service 的 `pushLocalEmcy()/peekLocalEmcy()/clearLocalEmcy()`，其中 `clear()` 发送标准 `0x0000` error reset。该扩展不提供任意 CAN frame API。
+标准 recovery 不能通过 `AsyncMaster::Error(0)` 产生；`CanopenTestMaster` 中的 local EMCY access 是 B06-only，只在 Lely master 锁内暴露现有 local EMCY service 的 `pushLocalEmcy()/peekLocalEmcy()/clearLocalEmcy()`，其中 `clear()` 发送标准 `0x0000` error reset。该扩展不提供任意 CAN frame API。
 
 B06 preflight 要求 Host local EMCY active stack 为空。生成的 compact `0x1003` 在 Lely EMCY service 第一次同步前可能仍保持 DCF 初始值，因此初始 `0x1003:00` 不作为 active stack 深度；但 B06 自己开始产生 EMCY 后，cleanup 前仍通过已经同步的 `0x1003:00`、栈顶和 combined Error Register 共同保护全栈 `clear()`。
 
@@ -159,7 +179,7 @@ B06 在 Reset Communication 前先建立一个非零 vector A persistence marker
 
 ```cpp
 int gfcProcess(
-    EmcyTestMaster& master,
+    CanopenTestMaster& master,
     lely::io::CanChannel& wire_channel);
 ```
 
