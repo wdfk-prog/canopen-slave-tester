@@ -17,6 +17,7 @@
 #include "sdo_process.h"
 #include "sdo_block_process.h"
 #include "sdo_client_process.h"
+#include "storage_process.h"
 #include "shutdown_process.h"
 #include "sync_pdo_process.h"
 #include "time_process.h"
@@ -56,6 +57,7 @@ constexpr std::size_t kCanopenProcessCount =
     + CANOPEN_ENABLE_SDO_PROCESS
     + CANOPEN_ENABLE_SDO_BLOCK_PROCESS
     + CANOPEN_ENABLE_SDO_CLIENT_PROCESS
+    + CANOPEN_ENABLE_STORAGE_PROCESS
     + CANOPEN_ENABLE_PDO_PROCESS
     + CANOPEN_ENABLE_SYNC_PDO_PROCESS
     + CANOPEN_ENABLE_TIME_PROCESS
@@ -90,6 +92,9 @@ CanopenProcessTable makeCanopenProcesses(
 #if CANOPEN_ENABLE_SDO_BLOCK_PROCESS
         {"B02 SDO Server Block", [&master]() { return sdoBlockProcess(master); }},
 #endif /* CANOPEN_ENABLE_SDO_BLOCK_PROCESS */
+#if CANOPEN_ENABLE_STORAGE_PROCESS
+        {"J07/B01 Storage", [&master]() { return storageProcess(master); }},
+#endif /* CANOPEN_ENABLE_STORAGE_PROCESS */
 #if CANOPEN_ENABLE_SDO_CLIENT_PROCESS
         {"B03 MCU SDO Client", [&master]() { return sdoClientProcess(master); }},
 #endif /* CANOPEN_ENABLE_SDO_CLIENT_PROCESS */
