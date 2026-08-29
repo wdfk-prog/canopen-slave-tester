@@ -15,11 +15,14 @@
 #include <cstdint>
 #include <exception>
 #include <mutex>
+#include <system_error>
 
 namespace {
 
 /** Number of addressable CANopen node-ID values including index zero. */
 constexpr std::size_t kNmtStateSlotCount = 128U;
+/** Lely local Request NMT object containing the current managed-node state. */
+constexpr std::uint16_t kRequestNmtIndex = 0x1F82U;
 
 /** Latest remote NMT state observation for one node-ID. */
 struct NmtStateObservation {
@@ -61,6 +64,26 @@ void nmtStateCallback(std::uint8_t node_id,
     g_nmt_state_condition.notify_all();
 }
 
+/**
+ * @brief Read Lely's current managed state for one remote node.
+ *
+ * The local 0x1F82 Request NMT entry is updated by Lely during Boot and later
+ * NMT state indications, so it can confirm an idempotent command even when no
+ * new OnState callback is generated for an unchanged state.
+ */
+bool readManagedNmtState(lely::canopen::AsyncMaster& master, std::uint8_t node_id,
+                         lely::canopen::NmtState& state)
+{
+    std::error_code error;
+    const std::uint8_t raw_state = master.Read<std::uint8_t>(kRequestNmtIndex, node_id, error);
+    if (error) {
+        return false;
+    }
+
+    state = static_cast<lely::canopen::NmtState>(raw_state);
+    return true;
+}
+
 } // namespace
 
 bool issueNmtCommand(lely::canopen::AsyncMaster& master,
@@ -99,15 +122,16 @@ bool issueNmtCommandAndWaitForState(
         return false;
     }
 
-    /* Hold the observation mutex across Command() so no OnState callback can
-     * publish into g_nmt_states between the baseline snapshot and command
-     * submission. This orders cache publication only; Lely OnState carries no
-     * command token. A callback that entered dispatch before this lock but was
-     * already blocked waiting for g_nmt_state_mutex can still publish after
-     * Command() and appear as a newer generation. That extremely narrow race is
-     * an accepted project limitation unless runtime evidence shows it matters.
-     * The callback takes this mutex only after Lely releases its own node lock,
-     * so this does not invert the master/callback lock order. */
+    /* Snapshot Lely's managed state without holding the observer mutex. Device
+     * access may take Lely-internal locks, while the observer mutex is only for
+     * the test-side generation cache. */
+    lely::canopen::NmtState managed_state_before = lely::canopen::NmtState::BOOTUP;
+    const bool already_expected_before =
+        readManagedNmtState(master, node_id, managed_state_before)
+        && managed_state_before == expected_state;
+
+    /* Hold the observation mutex across the generation snapshot and Command() so
+     * no OnState callback can publish between those two operations. */
     std::uint64_t baseline_generation = 0;
     {
         std::lock_guard<std::mutex> lock(g_nmt_state_mutex);
@@ -117,13 +141,30 @@ bool issueNmtCommandAndWaitForState(
                 description);
             return false;
         }
+
         baseline_generation = g_nmt_states[node_id].generation;
         if (!issueNmtCommand(master, command, node_id, description)) {
             return false;
         }
     }
 
-    /* The event-loop thread publishes OnState while this control thread waits. */
+    /* Re-read after command acceptance before using the idempotent shortcut.
+     * This prevents a stale pre-command 0x1F82 value from satisfying the wait if
+     * the managed node changed state while the command was being submitted. */
+    if (already_expected_before) {
+        lely::canopen::NmtState managed_state_after = lely::canopen::NmtState::BOOTUP;
+        if (readManagedNmtState(master, node_id, managed_state_after)
+            && managed_state_after == expected_state) {
+            spdlog::debug(
+                "{} accepted as idempotent: node={} already state=0x{:02x}",
+                description, static_cast<unsigned int>(node_id),
+                static_cast<unsigned int>(expected_state));
+            return true;
+        }
+    }
+
+    /* A real transition still requires a fresh OnState publication newer than
+     * the pre-command baseline. */
     std::unique_lock<std::mutex> lock(g_nmt_state_mutex);
     const bool reached = g_nmt_state_condition.wait_for(
         lock, timeout, [node_id, expected_state, baseline_generation]() {

@@ -48,29 +48,35 @@ bool issueNmtCommand(lely::canopen::AsyncMaster& master,
 void registerNmtStateCallback(lely::canopen::AsyncMaster& master);
 
 /**
- * @brief Issue one remote NMT command and wait for a fresh target-state event.
+ * @brief Issue one remote NMT command and confirm the requested target state.
  *
- * The wait starts from the state-event generation already published before
- * Command() is submitted, so an already-cached stale state cannot satisfy the
- * request. A successful return requires local command acceptance and a later
- * publication of the requested OnState() value. Lely does not attach a command
- * token to OnState(), so this helper provides event-ordering evidence rather
- * than strict transaction correlation. An older callback that entered dispatch
- * before Command() but was delayed before publishing its state is a theoretical
- * residual race accepted by this project. This helper is intended for nonzero
- * remote node-IDs; broadcasts and local-master state changes cannot be confirmed
- * through the remote OnState callback. Because it blocks waiting for that
- * callback, it must not be called from the Lely event-loop thread that dispatches
- * OnState().
+ * Before Command() is submitted, the helper reads Lely's local 0x1F82 Request
+ * NMT entry for the managed node. If it already reports @p expected_state, the
+ * command is treated as idempotent: local command acceptance plus the existing
+ * managed-state evidence satisfies the request even when Lely emits no fresh
+ * OnState() event for an unchanged state. Otherwise the helper preserves the
+ * stricter transition path and requires a later matching OnState() publication
+ * whose generation is newer than the pre-command baseline.
+ *
+ * Lely does not attach a command token to OnState(), so the transition path
+ * provides event-ordering evidence rather than strict transaction correlation.
+ * An older callback that entered dispatch before Command() but was delayed before
+ * publishing its state is a theoretical residual race accepted by this project.
+ * This helper is intended for nonzero remote node-IDs; broadcasts and local-master
+ * state changes cannot be confirmed through this mechanism. Because the
+ * transition path blocks waiting for OnState(), it must not be called from the
+ * Lely event-loop thread that dispatches OnState().
  *
  * @param master Active Lely asynchronous CANopen master.
  * @param command NMT command to issue.
  * @param node_id Nonzero remote node-ID whose state must be confirmed.
  * @param expected_state Remote NMT state required after the command.
- * @param timeout Maximum wait for a fresh matching OnState indication.
+ * @param timeout Maximum wait for a fresh matching OnState indication when a
+ *        state transition is required.
  * @param description Human-readable operation text used in diagnostics.
- * @return true when the command is accepted and the fresh target state is
- *         observed; otherwise false.
+ * @return true when the command is accepted and either the target was already in
+ *         the expected state or a fresh matching target-state event is observed;
+ *         otherwise false.
  */
 bool issueNmtCommandAndWaitForState(
     lely::canopen::AsyncMaster& master, lely::canopen::NmtCommand command,
