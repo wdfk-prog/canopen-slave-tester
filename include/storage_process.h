@@ -7,7 +7,7 @@
 #define STORAGE_PROCESS_H
 
 /** Enable the J07/B01 EEPROM Storage validation process. */
-#define CANOPEN_ENABLE_STORAGE_PROCESS 1
+#define CANOPEN_ENABLE_STORAGE_PROCESS 0
 /** Environment variable selecting one destructive B01 execution group. */
 #define CANOPEN_STORAGE_MODE_ENV "CANOPEN_STORAGE_MODE"
 /** Maximum wait for an operator-driven power event and fresh Boot callback. */
