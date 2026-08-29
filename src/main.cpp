@@ -18,6 +18,7 @@
 #include "sdo_block_process.h"
 #include "sdo_client_process.h"
 #include "storage_process.h"
+#include "srdo_process.h"
 #include "shutdown_process.h"
 #include "sync_pdo_process.h"
 #include "time_process.h"
@@ -63,7 +64,8 @@ constexpr std::size_t kCanopenProcessCount =
     + CANOPEN_ENABLE_TIME_PROCESS
     + CANOPEN_ENABLE_EMCY_PROCESS
     + CANOPEN_ENABLE_EMCY_CONSUMER_PROCESS
-    + CANOPEN_ENABLE_GFC_PROCESS;
+    + CANOPEN_ENABLE_GFC_PROCESS
+    + CANOPEN_ENABLE_SRDO_PROCESS;
 
 /** Ordered master-side automatic validation process table type. */
 using CanopenProcessTable = std::array<CanopenProcessEntry, kCanopenProcessCount>;
@@ -72,14 +74,14 @@ using CanopenProcessTable = std::array<CanopenProcessEntry, kCanopenProcessCount
  * @brief Bind all enabled master-side validation processes to one master.
  *
  * @param master Active Host master; B06 additionally uses its local EMCY shim.
- * @param gfc_wire_channel Dedicated second CAN channel used by B09G when enabled.
+ * @param safety_wire_channel Dedicated second CAN channel used by B09G/B09S when enabled.
  * @return Ordered callable process table.
  */
 CanopenProcessTable makeCanopenProcesses(
     CanopenTestMaster& master
-#if CANOPEN_ENABLE_GFC_PROCESS
-    , lely::io::CanChannel& gfc_wire_channel
-#endif /* CANOPEN_ENABLE_GFC_PROCESS */
+#if CANOPEN_ENABLE_GFC_PROCESS || CANOPEN_ENABLE_SRDO_PROCESS
+    , lely::io::CanChannel& safety_wire_channel
+#endif /* CANOPEN_ENABLE_GFC_PROCESS || CANOPEN_ENABLE_SRDO_PROCESS */
 )
 {
     return {{
@@ -115,10 +117,15 @@ CanopenProcessTable makeCanopenProcesses(
          [&master]() { return emcyConsumerProcess(master); }},
 #endif /* CANOPEN_ENABLE_EMCY_CONSUMER_PROCESS */
 #if CANOPEN_ENABLE_GFC_PROCESS
-        {"B09G GFC", [&master, &gfc_wire_channel]() {
-             return gfcProcess(master, gfc_wire_channel);
+        {"B09G GFC", [&master, &safety_wire_channel]() {
+             return gfcProcess(master, safety_wire_channel);
          }},
 #endif /* CANOPEN_ENABLE_GFC_PROCESS */
+#if CANOPEN_ENABLE_SRDO_PROCESS
+        {"J09/B09S SRDO", [&master, &safety_wire_channel]() {
+             return srdoProcess(master, safety_wire_channel);
+         }},
+#endif /* CANOPEN_ENABLE_SRDO_PROCESS */
     }};
 }
 
@@ -301,16 +308,16 @@ bool validateCanBitrate(lely::io::CanController& controller)
  * @param executor Executor associated with loop.
  * @param timer CANopen protocol timer dedicated to this role.
  * @param channel CAN channel dedicated to the Lely CANopen master.
- * @param gfc_wire_channel Dedicated second CAN channel used by B09G when enabled.
+ * @param safety_wire_channel Dedicated second CAN channel used by B09G/B09S when enabled.
  * @return Zero on success; otherwise a non-zero application result.
  */
 int runCanopenMaster(
     lely::io::Context& context, lely::ev::Loop& loop,
     lely::ev::Executor executor, lely::io::Timer& timer,
     lely::io::CanChannel& channel
-#if CANOPEN_ENABLE_GFC_PROCESS
-    , lely::io::CanChannel& gfc_wire_channel
-#endif /* CANOPEN_ENABLE_GFC_PROCESS */
+#if CANOPEN_ENABLE_GFC_PROCESS || CANOPEN_ENABLE_SRDO_PROCESS
+    , lely::io::CanChannel& safety_wire_channel
+#endif /* CANOPEN_ENABLE_GFC_PROCESS || CANOPEN_ENABLE_SRDO_PROCESS */
 )
 {
     /* Accumulate setup/process/shutdown failures; zero means the whole run is
@@ -357,9 +364,9 @@ int runCanopenMaster(
     if (startup_boot_succeeded) {
         const CanopenProcessTable canopen_processes = makeCanopenProcesses(
             master
-#if CANOPEN_ENABLE_GFC_PROCESS
-            , gfc_wire_channel
-#endif /* CANOPEN_ENABLE_GFC_PROCESS */
+#if CANOPEN_ENABLE_GFC_PROCESS || CANOPEN_ENABLE_SRDO_PROCESS
+            , safety_wire_channel
+#endif /* CANOPEN_ENABLE_GFC_PROCESS || CANOPEN_ENABLE_SRDO_PROCESS */
         );
         error_count += canopenRunProcesses(canopen_processes.data(),
                                            canopen_processes.size());
@@ -492,31 +499,31 @@ int main(void)
         return 1;
     }
 
-#if CANOPEN_ENABLE_GFC_PROCESS
-    std::unique_ptr<lely::io::CanChannel> gfc_wire_channel;
+#if CANOPEN_ENABLE_GFC_PROCESS || CANOPEN_ENABLE_SRDO_PROCESS
+    std::unique_ptr<lely::io::CanChannel> safety_wire_channel;
     if (CANOPEN_ROLE == CANOPEN_ROLE_MASTER) {
-        /* Keep AsyncMaster's channel exclusive. B09G uses a separate SocketCAN
-         * channel on the same interface and disables transmit self-reception. */
-        gfc_wire_channel.reset(new lely::io::CanChannel(
+        /* Keep AsyncMaster's channel exclusive. B09G/B09S share a second
+         * stage wire channel on the same interface with self-reception off. */
+        safety_wire_channel.reset(new lely::io::CanChannel(
             poll, executor, CANOPEN_CHANNEL_RX_QUEUE_SIZE, false));
-        gfc_wire_channel->open(
+        safety_wire_channel->open(
             controller, lely::io::CanBusFlag::NONE, error);
         if (error) {
-            spdlog::error("Unable to open B09G GFC wire channel on {}: {}",
+            spdlog::error("Unable to open B09 safety wire channel on {}: {}",
                           CANOPEN_INTERFACE_NAME, error.message());
             spdlog::shutdown();
             return 1;
         }
     }
-#endif /* CANOPEN_ENABLE_GFC_PROCESS */
+#endif /* CANOPEN_ENABLE_GFC_PROCESS || CANOPEN_ENABLE_SRDO_PROCESS */
 
     int result = 1;
     if (CANOPEN_ROLE == CANOPEN_ROLE_MASTER) {
         result = runCanopenMaster(
             context, loop, executor, timer, channel
-#if CANOPEN_ENABLE_GFC_PROCESS
-            , *gfc_wire_channel
-#endif /* CANOPEN_ENABLE_GFC_PROCESS */
+#if CANOPEN_ENABLE_GFC_PROCESS || CANOPEN_ENABLE_SRDO_PROCESS
+            , *safety_wire_channel
+#endif /* CANOPEN_ENABLE_GFC_PROCESS || CANOPEN_ENABLE_SRDO_PROCESS */
         );
     } else {
         result = runCanopenSlave(context, loop, executor, timer, channel);
