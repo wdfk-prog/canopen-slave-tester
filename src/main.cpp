@@ -73,8 +73,8 @@ using CanopenProcessTable = std::array<CanopenProcessEntry, kCanopenProcessCount
 /**
  * @brief Bind all enabled master-side validation processes to one master.
  *
- * @param master Active Host master; B06 additionally uses its local EMCY shim.
- * @param safety_wire_channel Dedicated second CAN channel used by B09G/B09S when enabled.
+ * @param master Active Host master; EMCY consumer validation additionally uses its local EMCY shim.
+ * @param safety_wire_channel Dedicated second CAN channel used by GFC/SRDO validation when enabled.
  * @return Ordered callable process table.
  */
 CanopenProcessTable makeCanopenProcesses(
@@ -86,43 +86,43 @@ CanopenProcessTable makeCanopenProcesses(
 {
     return {{
 #if CANOPEN_ENABLE_HEARTBEAT_PROCESS
-        {"A01 Heartbeat", [&master]() { return heartbeatProcess(master); }},
+        {"Heartbeat validation", [&master]() { return heartbeatProcess(master); }},
 #endif /* CANOPEN_ENABLE_HEARTBEAT_PROCESS */
 #if CANOPEN_ENABLE_SDO_PROCESS
-        {"A02 SDO", [&master]() { return sdoProcess(master); }},
+        {"SDO object-access validation", [&master]() { return sdoProcess(master); }},
 #endif /* CANOPEN_ENABLE_SDO_PROCESS */
 #if CANOPEN_ENABLE_SDO_BLOCK_PROCESS
-        {"B02 SDO Server Block", [&master]() { return sdoBlockProcess(master); }},
+        {"SDO server block-transfer validation", [&master]() { return sdoBlockProcess(master); }},
 #endif /* CANOPEN_ENABLE_SDO_BLOCK_PROCESS */
 #if CANOPEN_ENABLE_STORAGE_PROCESS
-        {"J07/B01 Storage", [&master]() { return storageProcess(master); }},
+        {"Storage persistence validation", [&master]() { return storageProcess(master); }},
 #endif /* CANOPEN_ENABLE_STORAGE_PROCESS */
 #if CANOPEN_ENABLE_SDO_CLIENT_PROCESS
-        {"B03 MCU SDO Client", [&master]() { return sdoClientProcess(master); }},
+        {"MCU SDO client validation", [&master]() { return sdoClientProcess(master); }},
 #endif /* CANOPEN_ENABLE_SDO_CLIENT_PROCESS */
 #if CANOPEN_ENABLE_PDO_PROCESS
-        {"A03 PDO", [&master]() { return pdoProcess(master); }},
+        {"PDO validation", [&master]() { return pdoProcess(master); }},
 #endif /* CANOPEN_ENABLE_PDO_PROCESS */
 #if CANOPEN_ENABLE_SYNC_PDO_PROCESS
-        {"A04 SYNC PDO", [&master]() { return syncPdoProcess(master); }},
+        {"SYNC/synchronous PDO validation", [&master]() { return syncPdoProcess(master); }},
 #endif /* CANOPEN_ENABLE_SYNC_PDO_PROCESS */
 #if CANOPEN_ENABLE_TIME_PROCESS
-        {"A05 TIME", [&master]() { return timeProcess(master); }},
+        {"TIME consumer validation", [&master]() { return timeProcess(master); }},
 #endif /* CANOPEN_ENABLE_TIME_PROCESS */
 #if CANOPEN_ENABLE_EMCY_PROCESS
-        {"A06 EMCY", [&master]() { return emcyProcess(master); }},
+        {"EMCY producer validation", [&master]() { return emcyProcess(master); }},
 #endif /* CANOPEN_ENABLE_EMCY_PROCESS */
 #if CANOPEN_ENABLE_EMCY_CONSUMER_PROCESS
-        {"B06 EMCY Consumer",
+        {"EMCY consumer validation",
          [&master]() { return emcyConsumerProcess(master); }},
 #endif /* CANOPEN_ENABLE_EMCY_CONSUMER_PROCESS */
 #if CANOPEN_ENABLE_GFC_PROCESS
-        {"B09G GFC", [&master, &safety_wire_channel]() {
+        {"GFC protocol validation", [&master, &safety_wire_channel]() {
              return gfcProcess(master, safety_wire_channel);
          }},
 #endif /* CANOPEN_ENABLE_GFC_PROCESS */
 #if CANOPEN_ENABLE_SRDO_PROCESS
-        {"J09/B09S SRDO", [&master, &safety_wire_channel]() {
+        {"SRDO protocol validation", [&master, &safety_wire_channel]() {
              return srdoProcess(master, safety_wire_channel);
          }},
 #endif /* CANOPEN_ENABLE_SRDO_PROCESS */
@@ -301,14 +301,14 @@ bool validateCanBitrate(lely::io::CanController& controller)
 }
 
 /**
- * @brief Run the AsyncMaster-based enabled A/B tester stages.
+ * @brief Run enabled AsyncMaster-based master-side validation processes.
  *
  * @param context Common Lely I/O context used to stop the worker on exit.
  * @param loop Common Lely event loop.
  * @param executor Executor associated with loop.
  * @param timer CANopen protocol timer dedicated to this role.
  * @param channel CAN channel dedicated to the Lely CANopen master.
- * @param safety_wire_channel Dedicated second CAN channel used by B09G/B09S when enabled.
+ * @param safety_wire_channel Dedicated second CAN channel used by GFC/SRDO validation when enabled.
  * @return Zero on success; otherwise a non-zero application result.
  */
 int runCanopenMaster(
@@ -359,7 +359,7 @@ int runCanopenMaster(
                      CANOPEN_SLAVE_NODE_ID);
     }
 
-    /* All enabled A-stage and B-stage master processes use one ordered
+    /* All enabled core-protocol and extended-protocol master processes use one ordered
      * fail-fast runner; bound callables preserve each process's master type. */
     if (startup_boot_succeeded) {
         const CanopenProcessTable canopen_processes = makeCanopenProcesses(
@@ -502,14 +502,14 @@ int main(void)
 #if CANOPEN_ENABLE_GFC_PROCESS || CANOPEN_ENABLE_SRDO_PROCESS
     std::unique_ptr<lely::io::CanChannel> safety_wire_channel;
     if (CANOPEN_ROLE == CANOPEN_ROLE_MASTER) {
-        /* Keep AsyncMaster's channel exclusive. B09G/B09S share a second
-         * stage wire channel on the same interface with self-reception off. */
+        /* Keep AsyncMaster's channel exclusive. GFC/SRDO validation share a second
+         * safety-wire channel on the same interface with self-reception off. */
         safety_wire_channel.reset(new lely::io::CanChannel(
             poll, executor, CANOPEN_CHANNEL_RX_QUEUE_SIZE, false));
         safety_wire_channel->open(
             controller, lely::io::CanBusFlag::NONE, error);
         if (error) {
-            spdlog::error("Unable to open B09 safety wire channel on {}: {}",
+            spdlog::error("Unable to open GFC/SRDO safety wire channel on {}: {}",
                           CANOPEN_INTERFACE_NAME, error.message());
             spdlog::shutdown();
             return 1;

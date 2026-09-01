@@ -115,7 +115,7 @@ int sdoProcess(lely::canopen::AsyncMaster& master)
     if (initial_read_result != SdoOperationResult::SUCCESS) {
         return 1;
     }
-    spdlog::info("A02 SDO user OD test started: original 0x2200:00=0x{:08x}",
+    spdlog::info("SDO object-access validation user OD test started: original 0x2200:00=0x{:08x}",
                  original_value);
 
     /* Step 2: select a value guaranteed to differ from the saved value so the
@@ -127,18 +127,18 @@ int sdoProcess(lely::canopen::AsyncMaster& master)
         writeControlValue(master, test_value);
     if (test_write_result == SdoOperationResult::WAIT_TIMEOUT) {
         spdlog::error(
-            "A02 SDO test aborted: 0x2200:00 write state is unknown; "
+            "SDO object-access validation test aborted: 0x2200:00 write state is unknown; "
             "verify the target value before rerunning the test");
         return 1;
     }
     if (test_write_result == SdoOperationResult::SDO_TIMEOUT) {
         spdlog::error(
-            "A02 test write timed out at the SDO protocol level; attempting "
+            "SDO object-access validation test write timed out at the SDO protocol level; attempting "
             "to restore the original value");
         if (restoreControlValue(master, original_value)
             != SdoOperationResult::SUCCESS) {
             spdlog::error(
-                "A02 SDO test failed and 0x2200:00 restoration was not "
+                "SDO object-access validation test failed and 0x2200:00 restoration was not "
                 "verified");
         }
         return 1;
@@ -165,18 +165,18 @@ int sdoProcess(lely::canopen::AsyncMaster& master)
         result = 1;
     } else if (read_back_value != test_value) {
         spdlog::error(
-            "A02 SDO write/read-back mismatch: expected=0x{:08x} "
+            "SDO object-access validation write/read-back mismatch: expected=0x{:08x} "
             "actual=0x{:08x}",
             test_value, read_back_value);
         result = 1;
     } else {
-        spdlog::info("A02 SDO write/read-back verified: 0x{:08x}",
+        spdlog::info("SDO object-access validation write/read-back verified: 0x{:08x}",
                      read_back_value);
     }
 
     if (completion_wait_timed_out) {
         spdlog::error(
-            "A02 SDO test cannot safely restore 0x2200:00 after a local "
+            "SDO object-access validation test cannot safely restore 0x2200:00 after a local "
             "completion wait timeout; reset or inspect the target before "
             "continuing");
         return 1;
@@ -188,12 +188,12 @@ int sdoProcess(lely::canopen::AsyncMaster& master)
         restoreControlValue(master, original_value);
     if (restore_result != SdoOperationResult::SUCCESS) {
         spdlog::error(
-            "A02 SDO test failed and 0x2200:00 restoration was not verified");
+            "SDO object-access validation test failed and 0x2200:00 restoration was not verified");
         return 1;
     }
 
     if (result == 0) {
-        spdlog::info("A02 SDO user OD test passed");
+        spdlog::info("SDO object-access validation user OD test passed");
     }
     return result;
 }

@@ -1,6 +1,6 @@
 /**
  * @file
- * @brief Implements J06/B02 SDO Server Block Transfer validation.
+ * @brief Implements SDO server block-transfer validation.
  */
 
 #include "sdo_block_process.h"
@@ -42,9 +42,9 @@ constexpr unsigned int kStressIterations = 100U;
 constexpr std::uint32_t kTimeoutProbeMs = 500U;
 /** Extra local completion margin for the deliberate timeout probe. */
 constexpr std::uint32_t kTimeoutProbeMarginMs = 500U;
-/** FNV-1a 32-bit offset basis shared with the J04/B03 payload convention. */
+/** FNV-1a 32-bit offset basis shared with the MCU SDO client validation payload convention. */
 constexpr std::uint32_t kFnvOffset = 2166136261UL;
-/** FNV-1a 32-bit prime shared with the J04/B03 payload convention. */
+/** FNV-1a 32-bit prime shared with the MCU SDO client validation payload convention. */
 constexpr std::uint32_t kFnvPrime = 16777619UL;
 /** Base deterministic payload seed for normal block-transfer cases. */
 constexpr std::uint32_t kPatternSeed = 0xB02A5A5AU;
@@ -167,13 +167,13 @@ bool runIllegalAccessCase(lely::canopen::AsyncMaster& master,
     if (result != SdoOperationResult::FAILED
         || lely::canopen::sdo_errc(error) != lely::canopen::SdoErrc::NO_WRITE) {
         spdlog::error(
-            "B02-06 expected NO_WRITE (0x06010002), result={} error={}",
+            "SDO block illegal-access recovery expected NO_WRITE (0x06010002), result={} error={}",
             static_cast<int>(result), error.message());
         return false;
     }
 
-    spdlog::info("B02-06 illegal-access abort passed: {}", error.message());
-    return runBlockRoundTrip(master, "B02-06 abort recovery", 32U,
+    spdlog::info("SDO block illegal-access recovery illegal-access abort passed: {}", error.message());
+    return runBlockRoundTrip(master, "SDO block illegal-access recovery", 32U,
                              kPatternSeed ^ 0x06010002U, channel_known);
 }
 
@@ -184,7 +184,7 @@ bool restorePreOperational(lely::canopen::AsyncMaster& master)
         master, lely::canopen::NmtCommand::ENTER_PREOP,
         CANOPEN_SLAVE_NODE_ID, lely::canopen::NmtState::PREOP,
         std::chrono::milliseconds(CANOPEN_WAIT_TIMEOUT_MS),
-        "B02 restore Pre-operational");
+        "SDO server block-transfer validation restore Pre-operational");
 }
 
 /** Deliberately stop the server, require an SDO timeout, then restore it. */
@@ -195,7 +195,7 @@ bool runTimeoutRecoveryCase(lely::canopen::AsyncMaster& master,
             master, lely::canopen::NmtCommand::STOP,
             CANOPEN_SLAVE_NODE_ID, lely::canopen::NmtState::STOP,
             std::chrono::milliseconds(CANOPEN_WAIT_TIMEOUT_MS),
-            "B02-07 stop slave")) {
+            "SDO block stopped-node timeout recovery stop slave")) {
         return false;
     }
     node_stopped = true;
@@ -214,19 +214,19 @@ bool runTimeoutRecoveryCase(lely::canopen::AsyncMaster& master,
         node_stopped = false;
     }
     if (!restored) {
-        spdlog::error("B02-07 could not restore the slave to Pre-operational");
+        spdlog::error("SDO block stopped-node timeout recovery could not restore the slave to Pre-operational");
         return false;
     }
     if (result != SdoOperationResult::SDO_TIMEOUT
         || lely::canopen::sdo_errc(error) != lely::canopen::SdoErrc::TIMEOUT) {
         spdlog::error(
-            "B02-07 expected protocol SDO timeout, result={} error={}",
+            "SDO block stopped-node timeout recovery expected protocol SDO timeout, result={} error={}",
             static_cast<int>(result), error.message());
         return false;
     }
 
-    spdlog::info("B02-07 transfer timeout observed and NMT state restored");
-    return runBlockRoundTrip(master, "B02-07 timeout recovery", 32U,
+    spdlog::info("SDO block stopped-node timeout recovery transfer timeout observed and NMT state restored");
+    return runBlockRoundTrip(master, "SDO block stopped-node timeout recovery", 32U,
                              kPatternSeed ^ 0x05040000U, channel_known);
 }
 
@@ -246,25 +246,25 @@ bool synchronizeSdoServerAfterAbort(CanopenTestMaster& master,
             master, lely::canopen::NmtCommand::STOP,
             CANOPEN_SLAVE_NODE_ID, lely::canopen::NmtState::STOP,
             std::chrono::milliseconds(CANOPEN_WAIT_TIMEOUT_MS),
-            "B02-08 stop slave for SDO recovery barrier")) {
+            "SDO block client-abort recovery: stop slave for recovery barrier")) {
         /* The command may have reached the node even though the fresh state
          * indication was not observed, so remote SDO readiness is unknown. */
         channel_known = false;
         spdlog::error(
-            "B02-08 could not establish the remote SDO recovery barrier");
+            "SDO block client-abort recovery could not establish the remote SDO recovery barrier");
         return false;
     }
     node_stopped = true;
 
     if (!restorePreOperational(master)) {
         spdlog::error(
-            "B02-08 could not restore Pre-operational after the recovery barrier");
+            "SDO block client-abort recovery could not restore Pre-operational after the recovery barrier");
         return false;
     }
     node_stopped = false;
 
     spdlog::info(
-        "B02-08 remote SDO recovery barrier completed via Stop -> Pre-operational");
+        "SDO block client-abort recovery barrier completed via Stop -> Pre-operational");
     return true;
 }
 
@@ -291,17 +291,17 @@ bool runClientAbortCase(CanopenTestMaster& master, bool& channel_known,
         },
         std::chrono::milliseconds(CANOPEN_SDO_TIMEOUT_MS), submit_error);
     if (submit_error) {
-        spdlog::error("B02-08 block request submission failed: {}",
+        spdlog::error("SDO block client-abort recovery block request submission failed: {}",
                       submit_error.message());
         return false;
     }
 
-    /* No other B02 SDO is active here, so cancelling the per-node queue
+    /* No other SDO server block-transfer operation is active here, so cancelling the per-node queue
      * targets the request just submitted while preserving Lely ownership. */
     if (!master.cancelRemoteSdoRequests(
             CANOPEN_SLAVE_NODE_ID, lely::canopen::SdoErrc::ERROR)) {
         channel_known = false;
-        spdlog::error("B02-08 remote Client-SDO service is unavailable");
+        spdlog::error("SDO block client-abort recovery remote Client-SDO service is unavailable");
         return false;
     }
 
@@ -313,25 +313,25 @@ bool runClientAbortCase(CanopenTestMaster& master, bool& channel_known,
             [state]() { return state->completed; })) {
         channel_known = false;
         spdlog::error(
-            "B02-08 client-abort completion timed out; SDO channel state is unknown");
+            "SDO block client-abort recovery client-abort completion timed out; SDO channel state is unknown");
         return false;
     }
 
     if (lely::canopen::sdo_errc(state->error)
         != lely::canopen::SdoErrc::ERROR) {
-        spdlog::error("B02-08 expected client GENERAL abort: error={}",
+        spdlog::error("SDO block client-abort recovery expected client GENERAL abort: error={}",
                       state->error.message());
         return false;
     }
 
-    spdlog::info("B02-08 client abort observed: {}", state->error.message());
+    spdlog::info("SDO block client-abort recovery client abort observed: {}", state->error.message());
     lock.unlock();
 
     if (!synchronizeSdoServerAfterAbort(master, channel_known, node_stopped)) {
         return false;
     }
 
-    return runBlockRoundTrip(master, "B02-08 client-abort recovery",
+    return runBlockRoundTrip(master, "SDO block client-abort recovery",
                              kMaxPayloadSize,
                              kPatternSeed ^ 0x08000001U, channel_known);
 }
@@ -340,7 +340,7 @@ bool runClientAbortCase(CanopenTestMaster& master, bool& channel_known,
 bool runExpeditedRegression(lely::canopen::AsyncMaster& master,
                             bool& channel_known)
 {
-    if (!runBlockRoundTrip(master, "B02-09 block prerequisite", 32U,
+    if (!runBlockRoundTrip(master, "SDO block-to-expedited regression block prerequisite", 32U,
                            kPatternSeed ^ 0x09U, channel_known)) {
         return false;
     }
@@ -351,11 +351,11 @@ bool runExpeditedRegression(lely::canopen::AsyncMaster& master,
         device_type);
     updateChannelState(result, channel_known);
     if (result != SdoOperationResult::SUCCESS) {
-        spdlog::error("B02-09 expedited SDO regression failed");
+        spdlog::error("SDO block-to-expedited regression failed");
         return false;
     }
 
-    spdlog::info("B02-09 block-to-expedited regression passed: device_type=0x{:08x}",
+    spdlog::info("SDO block-to-expedited regression passed: device_type=0x{:08x}",
                  device_type);
     return true;
 }
@@ -371,7 +371,7 @@ bool runSegmentedRegression(lely::canopen::AsyncMaster& master,
         kBlockObjectSubindex, expected);
     updateChannelState(result, channel_known);
     if (result != SdoOperationResult::SUCCESS) {
-        spdlog::error("B02-10 block prerequisite download failed");
+        spdlog::error("SDO block-to-segmented regression block prerequisite download failed");
         return false;
     }
 
@@ -381,11 +381,11 @@ bool runSegmentedRegression(lely::canopen::AsyncMaster& master,
         kBlockObjectSubindex, actual);
     updateChannelState(result, channel_known);
     if (result != SdoOperationResult::SUCCESS
-        || !validatePayload("B02-10 block-to-segmented", expected, actual)) {
+        || !validatePayload("SDO block-to-segmented regression segmented upload", expected, actual)) {
         return false;
     }
 
-    spdlog::info("B02-10 block-to-segmented regression passed");
+    spdlog::info("SDO block-to-segmented regression passed");
     return true;
 }
 
@@ -396,15 +396,15 @@ bool runStressCase(lely::canopen::AsyncMaster& master, bool& channel_known)
          ++iteration) {
         const std::uint32_t seed =
             kPatternSeed ^ (0x11000000U + iteration * 0x01010101U);
-        if (!runBlockRoundTrip(master, "B02-11 stress", kMaxPayloadSize,
+        if (!runBlockRoundTrip(master, "SDO block maximum-size stability loop stress", kMaxPayloadSize,
                                seed, channel_known)) {
-            spdlog::error("B02-11 failed at iteration {}", iteration + 1U);
+            spdlog::error("SDO block maximum-size stability loop failed at iteration {}", iteration + 1U);
             return false;
         }
     }
 
     spdlog::info(
-        "B02-11 functional stability passed: {} maximum-size round trips; "
+        "SDO block maximum-size stability loop functional stability passed: {} maximum-size round trips; "
         "runtime heap leak evidence requires target-side memory statistics",
         kStressIterations);
     return true;
@@ -420,7 +420,7 @@ bool restoreOriginalPayload(lely::canopen::AsyncMaster& master,
         kBlockObjectSubindex, original);
     updateChannelState(result, channel_known);
     if (result != SdoOperationResult::SUCCESS) {
-        spdlog::error("B02 cleanup block download failed");
+        spdlog::error("SDO server block-transfer validation cleanup block download failed");
         return false;
     }
 
@@ -430,12 +430,12 @@ bool restoreOriginalPayload(lely::canopen::AsyncMaster& master,
         kBlockObjectSubindex, readback);
     updateChannelState(result, channel_known);
     if (result != SdoOperationResult::SUCCESS
-        || !validatePayload("B02 cleanup", original, readback)) {
-        spdlog::error("B02 cleanup read-back verification failed");
+        || !validatePayload("SDO server block-transfer validation cleanup", original, readback)) {
+        spdlog::error("SDO server block-transfer validation cleanup read-back verification failed");
         return false;
     }
 
-    spdlog::info("B02 cleanup restored the original 0x2304 payload");
+    spdlog::info("SDO server block-transfer validation cleanup restored the original 0x2304 payload");
     return true;
 }
 
@@ -455,11 +455,11 @@ int sdoBlockProcess(CanopenTestMaster& master)
     if (result != SdoOperationResult::SUCCESS || original.empty()
         || original.size() > kMaxPayloadSize) {
         spdlog::error(
-            "B02 cannot save the original 0x2304 payload; verify MCU block fixture configuration");
+            "SDO server block-transfer validation cannot save the original 0x2304 payload; verify MCU block fixture configuration");
         return 1;
     }
 
-    spdlog::info("B02 saved original 0x2304 payload: size={} checksum=0x{:08x}",
+    spdlog::info("SDO server block-transfer validation saved original 0x2304 payload: size={} checksum=0x{:08x}",
                  original.size(), checksum(original));
 
     do {
@@ -468,11 +468,11 @@ int sdoBlockProcess(CanopenTestMaster& master)
             std::size_t size;
             std::uint32_t seed;
         } functional_cases[] = {
-            {"B02-01 32-byte block", 32U, kPatternSeed ^ 0x01U},
-            {"B02-02 900-byte block", 900U, kPatternSeed ^ 0x02U},
-            {"B02-03 1024-byte block", 1024U, kPatternSeed ^ 0x03U},
-            {"B02-04 1025-byte block", 1025U, kPatternSeed ^ 0x04U},
-            {"B02-05 2048-byte block", 2048U, kPatternSeed ^ 0x05U},
+            {"SDO block transfer: 32 bytes", 32U, kPatternSeed ^ 0x01U},
+            {"SDO block transfer: 900 bytes", 900U, kPatternSeed ^ 0x02U},
+            {"SDO block transfer: 1024 bytes", 1024U, kPatternSeed ^ 0x03U},
+            {"SDO block transfer: 1025 bytes", 1025U, kPatternSeed ^ 0x04U},
+            {"SDO block transfer: 2048 bytes", 2048U, kPatternSeed ^ 0x05U},
         };
 
         for (const auto& test_case : functional_cases) {
@@ -526,13 +526,13 @@ int sdoBlockProcess(CanopenTestMaster& master)
         cleanup_passed = restoreOriginalPayload(master, original, channel_known);
     } else {
         spdlog::error(
-            "B02 skips SDO cleanup because callback or NMT completion state is unknown");
+            "SDO server block-transfer validation skips SDO cleanup because callback or NMT completion state is unknown");
     }
 
     if (!cases_passed || !cleanup_passed) {
         return 1;
     }
 
-    spdlog::info("B02 SDO Server Block Transfer validation passed");
+    spdlog::info("SDO server block-transfer validation passed");
     return 0;
 }

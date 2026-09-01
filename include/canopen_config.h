@@ -28,9 +28,9 @@
 /** Expected nominal CAN bitrate in bit/s. */
 #define CANOPEN_EXPECTED_BITRATE 1000000
 
-/** Local CANopen master node-ID used by the enabled A/B tester stages. */
+/** Local CANopen master node-ID used by enabled master-side validation processes. */
 #define CANOPEN_MASTER_NODE_ID 127
-/** Managed MCU CANopen node-ID used by the enabled A/B tester stages. */
+/** Managed MCU CANopen node-ID used by enabled master-side validation processes. */
 #define CANOPEN_SLAVE_NODE_ID 1
 /** Lely software slave node-ID used by NMT-master validation. */
 #define CANOPEN_PEER_NODE_ID 2

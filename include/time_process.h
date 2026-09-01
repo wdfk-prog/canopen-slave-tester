@@ -6,7 +6,7 @@
 #ifndef TIME_PROCESS_H
 #define TIME_PROCESS_H
 
-/** Enable A05 after the MCU exposes the required 0x2300 diagnostic record. */
+/** Enable TIME consumer validation after the MCU exposes the required 0x2300 diagnostic record. */
 #define CANOPEN_ENABLE_TIME_PROCESS 0
 
 namespace lely {
@@ -23,7 +23,7 @@ class AsyncMaster;
  * diagnostic object, exercises valid/boundary/invalid-DLC and disable/re-enable
  * behavior, and restores the original 0x1012 value.
  *
- * The MCU test firmware must expose the diagnostic record described by A05 at
+ * The MCU test firmware must expose the diagnostic record described by TIME consumer validation at
  * 0x2300:01..03. The receive-count field is expected to increment from the MCU
  * TIME receive callback only for syntactically valid DLC=6 TIME frames.
  * Application is verified independently through the diagnostic ms/day fields.

@@ -196,7 +196,7 @@ bool waitForHeartbeat(std::chrono::milliseconds timeout)
 bool writeSlaveProducerHeartbeat(lely::canopen::AsyncMaster& master,
                                  std::uint16_t period_ms)
 {
-    /* A01 keeps its existing 3 s end-to-end wait contract; a zero completion
+    /* Heartbeat validation keeps its existing 3 s end-to-end wait contract; a zero completion
      * margin preserves that behavior while reusing the common SDO adapter. */
     const SdoOperationResult result = writeRemoteSdo<std::uint16_t>(
         master, CANOPEN_SLAVE_NODE_ID, kHeartbeatIndex, kHeartbeatSubindex,
@@ -422,7 +422,7 @@ int heartbeatProcess(lely::canopen::AsyncMaster& master)
     /* Step 4: put the slave in Operational before testing the opposite
      * direction, where the master supervises the slave heartbeat. */
     if (!issueNmtCommand(master, lely::canopen::NmtCommand::START,
-                         CANOPEN_SLAVE_NODE_ID, "A01 slave NMT Start")) {
+                         CANOPEN_SLAVE_NODE_ID, "Heartbeat validation slave NMT Start")) {
         return 1;
     }
     spdlog::info("NMT Start sent to node {}", CANOPEN_SLAVE_NODE_ID);

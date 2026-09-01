@@ -1,10 +1,18 @@
 cmake_minimum_required(VERSION 3.16)
 
-# Load the project-local cross-compilation configuration before project() so a
-# clean build directory can be configured with a plain `cmake ..` command.
-set(CMAKE_TOOLCHAIN_FILE
-    "${CMAKE_CURRENT_LIST_DIR}/cmake/build_config.cmake"
-    CACHE FILEPATH "CANopen master toolchain configuration" FORCE)
+option(CANOPEN_NATIVE_BUILD
+    "Build with a supplied native Linux Lely installation instead of the TQ8MP toolchain." OFF)
+
+# The deployed TQ8MP cross build remains the default. Native mode is an optional
+# local host-build surface and is not used by CI or release publication.
+if(NOT CANOPEN_NATIVE_BUILD)
+    set(CMAKE_TOOLCHAIN_FILE
+        "${CMAKE_CURRENT_LIST_DIR}/cmake/build_config.cmake"
+        CACHE FILEPATH "CANopen master toolchain configuration" FORCE)
+else()
+    set(CANOPEN_DEFAULT_BUILD_TYPE "MinSizeRel"
+        CACHE STRING "Default build type for optional native host builds")
+endif()
 
 project(canopen_master VERSION 0.5.0 LANGUAGES C CXX)
 
@@ -34,12 +42,12 @@ option(CANOPEN_ENABLE_WARNINGS "Enable strict project warnings." ON)
 if(NOT IS_DIRECTORY "${CANOPEN_LELY_INCLUDE_DIR}")
     message(FATAL_ERROR
         "Lely include directory does not exist: ${CANOPEN_LELY_INCLUDE_DIR}\n"
-        "Update CANOPEN_LELY_INCLUDE_DIR in cmake/build_config.local.cmake.")
+        "Set CANOPEN_LELY_INCLUDE_DIR to a matching Lely installation.")
 endif()
 if(NOT IS_DIRECTORY "${CANOPEN_LELY_LIBRARY_DIR}")
     message(FATAL_ERROR
         "Lely library directory does not exist: ${CANOPEN_LELY_LIBRARY_DIR}\n"
-        "Update CANOPEN_LELY_LIBRARY_DIR in cmake/build_config.local.cmake.")
+        "Set CANOPEN_LELY_LIBRARY_DIR to a matching Lely installation.")
 endif()
 
 set(LELY_INCLUDE_DIR "${CANOPEN_LELY_INCLUDE_DIR}")
@@ -170,30 +178,32 @@ set_target_properties(${TARGET_NAME} PROPERTIES
 canopen_apply_warnings(${TARGET_NAME})
 canopen_apply_debug_options(${TARGET_NAME})
 
-add_custom_target(download
-    COMMENT "Deploying ${TARGET_NAME} to target board and running..."
-    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-    COMMAND /bin/chmod a+x ./deploy/run.sh
-    COMMAND ./deploy/run.sh "${TARGET_NAME}" "${CACHED_IP_ADDR}" run
-            "$<TARGET_FILE:${TARGET_NAME}>"
-    USES_TERMINAL
-    VERBATIM)
-add_dependencies(download ${TARGET_NAME})
+if(NOT CANOPEN_NATIVE_BUILD)
+    add_custom_target(download
+        COMMENT "Deploying ${TARGET_NAME} to target board and running..."
+        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+        COMMAND /bin/chmod a+x ./deploy/run.sh
+        COMMAND ./deploy/run.sh "${TARGET_NAME}" "${CACHED_IP_ADDR}" run
+                "$<TARGET_FILE:${TARGET_NAME}>"
+        USES_TERMINAL
+        VERBATIM)
+    add_dependencies(download ${TARGET_NAME})
 
-add_custom_target(debug-deploy
-    COMMENT "Deploying Debug ${TARGET_NAME} and starting gdbserver..."
-    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-    COMMAND ${CMAKE_COMMAND}
-        "-DCANOPEN_BUILD_TYPE=$<CONFIG>"
-        -P "${CMAKE_SOURCE_DIR}/cmake/require_debug_build.cmake"
-    COMMAND /bin/chmod a+x ./deploy/run.sh
-    COMMAND ./deploy/run.sh "${TARGET_NAME}" "${CACHED_IP_ADDR}" gdb
-            "$<TARGET_FILE:${TARGET_NAME}>"
-    USES_TERMINAL
-    VERBATIM)
-add_dependencies(debug-deploy ${TARGET_NAME})
+    add_custom_target(debug-deploy
+        COMMENT "Deploying Debug ${TARGET_NAME} and starting gdbserver..."
+        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+        COMMAND ${CMAKE_COMMAND}
+            "-DCANOPEN_BUILD_TYPE=$<CONFIG>"
+            -P "${CMAKE_SOURCE_DIR}/cmake/require_debug_build.cmake"
+        COMMAND /bin/chmod a+x ./deploy/run.sh
+        COMMAND ./deploy/run.sh "${TARGET_NAME}" "${CACHED_IP_ADDR}" gdb
+                "$<TARGET_FILE:${TARGET_NAME}>"
+        USES_TERMINAL
+        VERBATIM)
+    add_dependencies(debug-deploy ${TARGET_NAME})
 
-add_custom_target(debug DEPENDS debug-deploy)
+    add_custom_target(debug DEPENDS debug-deploy)
+endif()
 
 install(TARGETS ${TARGET_NAME} RUNTIME DESTINATION bin)
 install(FILES

@@ -56,9 +56,9 @@ constexpr std::uint32_t kSyncProducerMask = 0x40000000U;
 constexpr std::uint32_t kTpdoInvalidMask = 0x80000000U;
 /** Transmission type 1 means one synchronous TPDO for every received SYNC. */
 constexpr std::uint8_t kSynchronousTransmissionType = 1U;
-/** Types 254 and 255 are asynchronous/event-driven and therefore valid A04 baselines. */
+/** Types 254 and 255 are asynchronous/event-driven and therefore valid SYNC/synchronous PDO validation baselines. */
 constexpr std::uint8_t kEventTransmissionTypeMinimum = 254U;
-/** 200 ms gives clear host-side timing separation without making the stage slow. */
+/** 200 ms gives clear host-side timing separation without making the process slow. */
 constexpr std::uint32_t kSyncPeriodUs = 200000U;
 /** Millisecond form of the same period for host waits and interval bounds. */
 constexpr std::uint32_t kSyncPeriodMs = kSyncPeriodUs / 1000U;
@@ -72,14 +72,14 @@ constexpr std::size_t kTpdoPayloadLength = 8U;
 constexpr std::size_t kObservationCapacity = kSyncSampleCount + 2U;
 /** Minimum no-SYNC observation window is longer than the original 1 s event timer. */
 constexpr std::uint32_t kMinimumQuietWindowMs = 1500U;
-/** Restored event-timer tolerance matches the A03 host-side timing allowance. */
+/** Restored event-timer tolerance matches the PDO validation host-side timing allowance. */
 constexpr std::uint32_t kEventTimerToleranceMs = 150U;
 /** Extra collection margin allows the first restored event TPDO to start at any phase. */
 constexpr std::uint32_t kEventCollectionMarginMs = 1500U;
 
 /** Monotonic clock used to compare callback order and latency. */
 using Clock = std::chrono::steady_clock;
-/** Lely PDO callback type retained so A04 can unregister its callback explicitly. */
+/** Lely PDO callback type retained so SYNC/synchronous PDO validation can unregister its callback explicitly. */
 using PdoCallback =
     std::function<void(int, std::error_code, const void*, std::size_t)>;
 /** Lely SYNC callback type retained for explicit callback cleanup. */
@@ -118,7 +118,7 @@ struct SyncPdoObservation {
 };
 
 /**
- * @brief Read the TPDO1 communication parameters that A04 must preserve.
+ * @brief Read the TPDO1 communication parameters that SYNC/synchronous PDO validation must preserve.
  *
  * @param master Active Lely asynchronous CANopen master.
  * @param snapshot Receives the original TPDO1 parameters.
@@ -171,7 +171,7 @@ bool compareTpdoSnapshot(const TpdoCommSnapshot& expected,
                                      std::uint32_t actual_value) {
         if (expected_value != actual_value) {
             spdlog::error(
-                "A04 restored TPDO1 {} mismatch: expected=0x{:x} actual=0x{:x}",
+                "SYNC/synchronous PDO validation restored TPDO1 {} mismatch: expected=0x{:x} actual=0x{:x}",
                 name, expected_value, actual_value);
             matches = false;
         }
@@ -205,7 +205,7 @@ bool verifyRestoredTpdoState(lely::canopen::AsyncMaster& master,
      * succeed, avoiding use of partially initialized restoration data. */
     TpdoCommSnapshot restored{};
     if (!readTpdoSnapshot(master, restored, completion_wait_timed_out)) {
-        spdlog::error("A04 TPDO1 restoration read-back failed");
+        spdlog::error("SYNC/synchronous PDO validation TPDO1 restoration read-back failed");
         return false;
     }
     if (!compareTpdoSnapshot(original, restored)) {
@@ -228,14 +228,14 @@ bool verifyRestoredTpdoState(lely::canopen::AsyncMaster& master,
     }
     if (restored_sync_cob_id != expected_sync_cob_id) {
         spdlog::error(
-            "A04 slave SYNC COB-ID changed during test: "
+            "SYNC/synchronous PDO validation slave SYNC COB-ID changed during test: "
             "expected=0x{:08x} actual=0x{:08x}",
             expected_sync_cob_id, restored_sync_cob_id);
         return false;
     }
 
     spdlog::info(
-        "A04 TPDO1 communication parameters restored and verified");
+        "SYNC/synchronous PDO validation TPDO1 communication parameters restored and verified");
     return true;
 }
 
@@ -262,7 +262,7 @@ bool recoverTpdoStateWithReset(lely::canopen::AsyncMaster& master,
                                bool& slave_needs_start)
 {
     spdlog::warn(
-        "A04 recovering unverified TPDO1 state with slave Reset Communication");
+        "SYNC/synchronous PDO validation recovering unverified TPDO1 state with slave Reset Communication");
 
     /* Step 1: clear stale Boot state before Reset Communication can complete. */
     prepareBootWait();
@@ -270,7 +270,7 @@ bool recoverTpdoStateWithReset(lely::canopen::AsyncMaster& master,
      * transaction without requiring a full application reset. */
     if (!issueNmtCommand(master, lely::canopen::NmtCommand::RESET_COMM,
                          CANOPEN_SLAVE_NODE_ID,
-                         "A04 cleanup slave Reset Communication")) {
+                         "SYNC/synchronous PDO validation cleanup slave Reset Communication")) {
         return false;
     }
     /* From this point cleanup owns the slave NMT state. Lely Boot management
@@ -282,7 +282,7 @@ bool recoverTpdoStateWithReset(lely::canopen::AsyncMaster& master,
     if (!waitForBootCompletion(
             std::chrono::milliseconds(CANOPEN_WAIT_TIMEOUT_MS))) {
         spdlog::error(
-            "A04 slave did not complete Boot during TPDO1 recovery");
+            "SYNC/synchronous PDO validation slave did not complete Boot during TPDO1 recovery");
         return false;
     }
 
@@ -293,7 +293,7 @@ bool recoverTpdoStateWithReset(lely::canopen::AsyncMaster& master,
             master, lely::canopen::NmtCommand::ENTER_PREOP,
             CANOPEN_SLAVE_NODE_ID, lely::canopen::NmtState::PREOP,
             std::chrono::milliseconds(CANOPEN_WAIT_TIMEOUT_MS),
-            "A04 recovery slave NMT Enter Pre-operational")) {
+            "SYNC/synchronous PDO validation recovery slave NMT Enter Pre-operational")) {
         return false;
     }
 
@@ -303,12 +303,12 @@ bool recoverTpdoStateWithReset(lely::canopen::AsyncMaster& master,
     if (!verifyRestoredTpdoState(master, original, expected_sync_cob_id,
                                  completion_wait_timed_out)) {
         spdlog::error(
-            "A04 Reset Communication recovery did not restore TPDO1");
+            "SYNC/synchronous PDO validation Reset Communication recovery did not restore TPDO1");
         return false;
     }
 
     spdlog::info(
-        "A04 Reset Communication recovered and verified TPDO1 state");
+        "SYNC/synchronous PDO validation Reset Communication recovered and verified TPDO1 state");
     return true;
 }
 
@@ -360,20 +360,20 @@ bool validateSyncTopology(lely::canopen::AsyncMaster& master,
      * clear and is populated directly by each Lely Read(). */
     std::error_code error;
     /* 0x1005 local read establishes that the Linux master, not the slave, is
-     * the configured SYNC producer for this stage. */
+     * the configured SYNC producer for this process. */
     const std::uint32_t local_sync_cob_id =
         master.Read<std::uint32_t>(kSyncCobIdIndex, kSubindex0, error);
     if (error) {
-        spdlog::error("A04 unable to read local 0x1005:00: {}",
+        spdlog::error("SYNC/synchronous PDO validation unable to read local 0x1005:00: {}",
                       error.message());
         return false;
     }
-    /* Save the original local 0x1006 so A04 can restore pre-test producer
+    /* Save the original local 0x1006 so SYNC/synchronous PDO validation can restore pre-test producer
      * behavior even if the original period was nonzero. */
     local_sync_period =
         master.Read<std::uint32_t>(kSyncPeriodIndex, kSubindex0, error);
     if (error) {
-        spdlog::error("A04 unable to read local 0x1006:00: {}",
+        spdlog::error("SYNC/synchronous PDO validation unable to read local 0x1006:00: {}",
                       error.message());
         return false;
     }
@@ -385,21 +385,21 @@ bool validateSyncTopology(lely::canopen::AsyncMaster& master,
         master.Read<std::uint8_t>(kSyncCounterOverflowIndex, kSubindex0,
                                   error);
     if (error) {
-        spdlog::error("A04 unable to read local 0x1019:00: {}",
+        spdlog::error("SYNC/synchronous PDO validation unable to read local 0x1019:00: {}",
                       error.message());
         return false;
     }
 
     if ((remote_sync_cob_id & kSyncProducerMask) != 0U) {
         spdlog::error(
-            "A04 slave 0x1005:00=0x{:08x} enables SYNC producer; the test "
+            "SYNC/synchronous PDO validation slave 0x1005:00=0x{:08x} enables SYNC producer; the test "
             "requires node {} to remain a SYNC consumer",
             remote_sync_cob_id, CANOPEN_SLAVE_NODE_ID);
         return false;
     }
     if ((local_sync_cob_id & kSyncProducerMask) == 0U) {
         spdlog::error(
-            "A04 local 0x1005:00=0x{:08x} does not enable the master SYNC "
+            "SYNC/synchronous PDO validation local 0x1005:00=0x{:08x} does not enable the master SYNC "
             "producer",
             local_sync_cob_id);
         return false;
@@ -407,13 +407,13 @@ bool validateSyncTopology(lely::canopen::AsyncMaster& master,
     if ((remote_sync_cob_id & ~kSyncProducerMask)
         != (local_sync_cob_id & ~kSyncProducerMask)) {
         spdlog::error(
-            "A04 SYNC COB-ID mismatch: slave=0x{:08x} master=0x{:08x}",
+            "SYNC/synchronous PDO validation COB-ID mismatch: slave=0x{:08x} master=0x{:08x}",
             remote_sync_cob_id, local_sync_cob_id);
         return false;
     }
     if (remote_sync_overflow != local_sync_overflow) {
         spdlog::error(
-            "A04 SYNC counter format mismatch: slave_0x1019={} "
+            "SYNC/synchronous PDO validation counter format mismatch: slave_0x1019={} "
             "master_0x1019={}",
             static_cast<unsigned int>(remote_sync_overflow),
             static_cast<unsigned int>(local_sync_overflow));
@@ -421,14 +421,14 @@ bool validateSyncTopology(lely::canopen::AsyncMaster& master,
     }
     if (local_sync_overflow != 0U) {
         spdlog::error(
-            "A04 requires counter-less SYNC for transmission type 1 test: "
+            "SYNC/synchronous PDO validation requires counter-less SYNC for transmission type 1 test: "
             "0x1019={}",
             static_cast<unsigned int>(local_sync_overflow));
         return false;
     }
 
     spdlog::info(
-        "A04 SYNC topology verified: master producer 0x{:08x}, slave "
+        "SYNC/synchronous PDO validation topology verified: master producer 0x{:08x}, slave "
         "consumer 0x{:08x}, original period={} us",
         local_sync_cob_id, remote_sync_cob_id, local_sync_period);
     return true;
@@ -450,7 +450,7 @@ bool writeLocalSyncPeriod(lely::canopen::AsyncMaster& master,
     master.Write<std::uint32_t>(kSyncPeriodIndex, kSubindex0, period_us,
                                 error);
     if (error) {
-        spdlog::error("A04 unable to write local 0x1006:00={} us: {}",
+        spdlog::error("SYNC/synchronous PDO validation unable to write local 0x1006:00={} us: {}",
                       period_us, error.message());
         return false;
     }
@@ -510,7 +510,7 @@ bool configureSynchronousTpdo(lely::canopen::AsyncMaster& master,
 }
 
 /**
- * @brief Restore the TPDO1 fields modified by A04.
+ * @brief Restore the TPDO1 fields modified by SYNC/synchronous PDO validation.
  *
  * @param master Active Lely asynchronous CANopen master.
  * @param original Saved TPDO1 communication parameters.
@@ -576,7 +576,7 @@ void resetObservation(const std::shared_ptr<SyncPdoObservation>& state)
 }
 
 /**
- * @brief Install A04 SYNC and TPDO1 callbacks.
+ * @brief Install SYNC/synchronous PDO validation and TPDO1 callbacks.
  *
  * The fifth generated SYNC stops the local periodic producer immediately so
  * the test has a deterministic sample count.
@@ -661,7 +661,7 @@ void registerCallbacks(lely::canopen::AsyncMaster& master,
         [state](std::uint16_t error_code,
                 std::uint8_t error_register) noexcept {
             {
-                /* Any SYNC processing error invalidates the A04 timing sample. */
+                /* Any SYNC processing error invalidates the SYNC/synchronous PDO validation timing sample. */
                 std::lock_guard<std::mutex> lock(state->mutex);
                 state->failed = true;
                 state->sync_error = true;
@@ -673,7 +673,7 @@ void registerCallbacks(lely::canopen::AsyncMaster& master,
 }
 
 /**
- * @brief Remove callbacks installed by A04.
+ * @brief Remove callbacks installed by SYNC/synchronous PDO validation.
  *
  * @param master Active Lely asynchronous CANopen master.
  */
@@ -685,7 +685,7 @@ void clearCallbacks(lely::canopen::AsyncMaster& master)
 }
 
 /**
- * @brief Report a callback-side A04 failure.
+ * @brief Report a callback-side SYNC/synchronous PDO validation failure.
  *
  * @param state Shared callback state.
  * @return true when no callback failure is present; otherwise false.
@@ -698,23 +698,23 @@ bool validateCallbackState(const std::shared_ptr<SyncPdoObservation>& state)
         return true;
     }
     if (state->tpdo_error) {
-        spdlog::error("A04 TPDO1 processing failed: {}",
+        spdlog::error("SYNC/synchronous PDO validation TPDO1 processing failed: {}",
                       state->tpdo_error.message());
     } else if (state->null_payload) {
-        spdlog::error("A04 TPDO1 callback returned a null payload");
+        spdlog::error("SYNC/synchronous PDO validation TPDO1 callback returned a null payload");
     } else if (state->invalid_tpdo) {
-        spdlog::error("A04 TPDO1 length mismatch: expected={} actual={}",
+        spdlog::error("SYNC/synchronous PDO validation TPDO1 length mismatch: expected={} actual={}",
                       kTpdoPayloadLength, state->invalid_length);
     } else if (state->sync_error) {
         spdlog::error(
-            "A04 SYNC processing error: code=0x{:04x} register=0x{:02x}",
+            "SYNC/synchronous PDO validation processing error: code=0x{:04x} register=0x{:02x}",
             state->sync_error_code,
             static_cast<unsigned int>(state->sync_error_register));
     } else if (state->sync_stop_error) {
-        spdlog::error("A04 unable to stop SYNC producer after sample set: {}",
+        spdlog::error("SYNC/synchronous PDO validation unable to stop SYNC producer after sample set: {}",
                       state->sync_stop_error.message());
     } else {
-        spdlog::error("A04 callback state failed for an unknown reason");
+        spdlog::error("SYNC/synchronous PDO validation callback state failed for an unknown reason");
     }
     return false;
 }
@@ -744,12 +744,12 @@ bool verifyQuietWindow(const std::shared_ptr<SyncPdoObservation>& state,
             return validateCallbackState(state);
         }
         spdlog::error(
-            "A04 quiet window violated: unexpected_sync={} unexpected_tpdo={}",
+            "SYNC/synchronous PDO validation quiet window violated: unexpected_sync={} unexpected_tpdo={}",
             state->sync_count, state->tpdo_count);
         return false;
     }
 
-    spdlog::info("A04 quiet window passed: {} ms without SYNC or TPDO1",
+    spdlog::info("SYNC/synchronous PDO validation quiet window passed: {} ms without SYNC or TPDO1",
                  quiet_window_ms);
     return true;
 }
@@ -776,7 +776,7 @@ bool waitForSynchronousSamples(
                            && state->tpdo_count >= kSyncSampleCount);
             })) {
         spdlog::error(
-            "A04 synchronous sample wait timed out: sync={}/{} tpdo={}/{}",
+            "SYNC/synchronous PDO validation synchronous sample wait timed out: sync={}/{} tpdo={}/{}",
             state->sync_count, kSyncSampleCount, state->tpdo_count,
             kSyncSampleCount);
         return false;
@@ -817,7 +817,7 @@ bool validateSynchronousTiming(
 
     if (sync_count != kSyncSampleCount || tpdo_count != kSyncSampleCount) {
         spdlog::error(
-            "A04 synchronous count mismatch: expected={} sync={} tpdo={}",
+            "SYNC/synchronous PDO validation synchronous count mismatch: expected={} sync={} tpdo={}",
             kSyncSampleCount, sync_count, tpdo_count);
         return false;
     }
@@ -825,7 +825,7 @@ bool validateSynchronousTiming(
     /* i pairs SYNC[i] with TPDO[i] and defines that pair's timing window. */
     for (std::size_t i = 0; i < kSyncSampleCount; ++i) {
         if (tpdo_timestamps[i] < sync_timestamps[i]) {
-            spdlog::error("A04 TPDO1[{}] arrived before SYNC[{}]", i, i);
+            spdlog::error("SYNC/synchronous PDO validation TPDO1[{}] arrived before SYNC[{}]", i, i);
             return false;
         }
 
@@ -838,7 +838,7 @@ bool validateSynchronousTiming(
                       + std::chrono::milliseconds(kSyncPeriodMs);
         if (tpdo_timestamps[i] >= deadline) {
             spdlog::error(
-                "A04 TPDO1[{}] crossed its SYNC interval boundary", i);
+                "SYNC/synchronous PDO validation TPDO1[{}] crossed its SYNC interval boundary", i);
             return false;
         }
 
@@ -847,7 +847,7 @@ bool validateSynchronousTiming(
         const auto latency =
             std::chrono::duration_cast<std::chrono::microseconds>(
                 tpdo_timestamps[i] - sync_timestamps[i]);
-        spdlog::info("A04 SYNC/TPDO1 pair[{}] latency={} us", i,
+        spdlog::info("SYNC/synchronous PDO validation/TPDO1 pair[{}] latency={} us", i,
                      latency.count());
     }
 
@@ -874,7 +874,7 @@ bool verifyPostSyncSilence(const std::shared_ptr<SyncPdoObservation>& state)
     if (state->sync_count != kSyncSampleCount
         || state->tpdo_count != kSyncSampleCount) {
         spdlog::error(
-            "A04 extra traffic after SYNC stop: sync={} tpdo={} expected={}",
+            "SYNC/synchronous PDO validation extra traffic after SYNC stop: sync={} tpdo={} expected={}",
             state->sync_count, state->tpdo_count, kSyncSampleCount);
         return false;
     }
@@ -904,7 +904,7 @@ bool verifyRestoredEventTpdo(
                 return state->failed || state->tpdo_count >= kEventSampleCount;
             })) {
         spdlog::error(
-            "A04 restored event TPDO1 timed out: received={}/{}",
+            "SYNC/synchronous PDO validation restored event TPDO1 timed out: received={}/{}",
             state->tpdo_count, kEventSampleCount);
         return false;
     }
@@ -914,7 +914,7 @@ bool verifyRestoredEventTpdo(
     }
     if (state->sync_count != 0U) {
         spdlog::error(
-            "A04 unexpected SYNC while checking restored event TPDO1: {}",
+            "SYNC/synchronous PDO validation unexpected SYNC while checking restored event TPDO1: {}",
             state->sync_count);
         return false;
     }
@@ -935,13 +935,13 @@ bool verifyRestoredEventTpdo(
         + static_cast<std::int64_t>(kEventTimerToleranceMs);
     if (interval_ms < minimum_ms || interval_ms > maximum_ms) {
         spdlog::error(
-            "A04 restored event TPDO1 period out of tolerance: "
+            "SYNC/synchronous PDO validation restored event TPDO1 period out of tolerance: "
             "expected={}+/-{} ms actual={} ms",
             event_timer_ms, kEventTimerToleranceMs, interval_ms);
         return false;
     }
 
-    spdlog::info("A04 restored event TPDO1 interval={} ms", interval_ms);
+    spdlog::info("SYNC/synchronous PDO validation restored event TPDO1 interval={} ms", interval_ms);
     return true;
 }
 
@@ -966,12 +966,12 @@ int syncPdoProcess(lely::canopen::AsyncMaster& master)
     /* false means remote SDO completion state is known. A local wait timeout
      * sets this because issuing another SDO could overlap an unknown request. */
     bool completion_wait_timed_out = false;
-    /* false until A04 installs its SYNC/TPDO callbacks; cleanup uses this flag
+    /* false until SYNC/synchronous PDO validation installs its SYNC/TPDO callbacks; cleanup uses this flag
      * to avoid clearing callbacks that were never registered. */
     bool callbacks_registered = false;
     /* false until the master's original local 0x1006 period is read safely. */
     bool local_sync_period_saved = false;
-    /* false until A04 writes local 0x1006; only then is restoration required. */
+    /* false until SYNC/synchronous PDO validation writes local 0x1006; only then is restoration required. */
     bool local_sync_period_touched = false;
     /* false means the slave is expected Operational; true tracks states such as
      * Pre-operational or post-reset that require an explicit NMT Start. */
@@ -979,7 +979,7 @@ int syncPdoProcess(lely::canopen::AsyncMaster& master)
     /* Zero is a neutral placeholder until remote 0x1005 is uploaded. */
     std::uint32_t remote_sync_cob_id = 0;
     /* Zero is only initial storage; the exact pre-test local 0x1006 value is
-     * saved before A04 changes SYNC generation. */
+     * saved before SYNC/synchronous PDO validation changes SYNC generation. */
     std::uint32_t original_local_sync_period = 0;
     /* Value-initialize all snapshot fields so no partially read data is ever
      * mistaken for a valid saved configuration. */
@@ -1003,7 +1003,7 @@ int syncPdoProcess(lely::canopen::AsyncMaster& master)
     if (result == 0
         && !issueNmtCommand(master, lely::canopen::NmtCommand::START,
                             CANOPEN_MASTER_NODE_ID,
-                            "A04 local master NMT Start")) {
+                            "SYNC/synchronous PDO validation local master NMT Start")) {
         result = 1;
     }
 
@@ -1017,7 +1017,7 @@ int syncPdoProcess(lely::canopen::AsyncMaster& master)
                 master, lely::canopen::NmtCommand::ENTER_PREOP,
                 CANOPEN_SLAVE_NODE_ID, lely::canopen::NmtState::PREOP,
                 std::chrono::milliseconds(CANOPEN_WAIT_TIMEOUT_MS),
-                "A04 slave NMT Enter Pre-operational")) {
+                "SYNC/synchronous PDO validation slave NMT Enter Pre-operational")) {
             result = 1;
         }
     }
@@ -1031,7 +1031,7 @@ int syncPdoProcess(lely::canopen::AsyncMaster& master)
         } else {
             snapshot_saved = true;
             spdlog::info(
-                "A04 saved TPDO1: cobid=0x{:08x} type={} inhibit={} "
+                "SYNC/synchronous PDO validation saved TPDO1: cobid=0x{:08x} type={} inhibit={} "
                 "event={} sync_start={}",
                 original.cob_id,
                 static_cast<unsigned int>(original.transmission_type),
@@ -1044,19 +1044,19 @@ int syncPdoProcess(lely::canopen::AsyncMaster& master)
      * TPDO1 is enabled, event-driven, and has a nonzero event timer that can be
      * used after restoration as an observable regression check. */
     if (result == 0 && (original.cob_id & kTpdoInvalidMask) != 0U) {
-        spdlog::error("A04 TPDO1 is disabled in the original configuration");
+        spdlog::error("SYNC/synchronous PDO validation TPDO1 is disabled in the original configuration");
         result = 1;
     }
     if (result == 0
         && original.transmission_type < kEventTransmissionTypeMinimum) {
         spdlog::error(
-            "A04 expected an event-driven original TPDO1 type, actual={}",
+            "SYNC/synchronous PDO validation expected an event-driven original TPDO1 type, actual={}",
             static_cast<unsigned int>(original.transmission_type));
         result = 1;
     }
     if (result == 0 && original.event_timer == 0U) {
         spdlog::error(
-            "A04 original TPDO1 event timer is zero; restored periodic "
+            "SYNC/synchronous PDO validation original TPDO1 event timer is zero; restored periodic "
             "behavior cannot be verified");
         result = 1;
     }
@@ -1082,7 +1082,7 @@ int syncPdoProcess(lely::canopen::AsyncMaster& master)
         temporary_configuration_completed = true;
     }
 
-    /* Step 8 - Read back the two fields that A04 intentionally changed before
+    /* Step 8 - Read back the two fields that SYNC/synchronous PDO validation intentionally changed before
      * leaving Pre-operational. This catches rejected/partial configuration. */
     if (result == 0) {
         /* Zero is only a placeholder until 0x1800:01 read-back succeeds. */
@@ -1116,7 +1116,7 @@ int syncPdoProcess(lely::canopen::AsyncMaster& master)
             && (configured_cob_id != original.cob_id
                 || configured_type != kSynchronousTransmissionType)) {
             spdlog::error(
-                "A04 synchronous TPDO1 read-back mismatch: cobid=0x{:08x} "
+                "SYNC/synchronous PDO validation synchronous TPDO1 read-back mismatch: cobid=0x{:08x} "
                 "type={}",
                 configured_cob_id,
                 static_cast<unsigned int>(configured_type));
@@ -1133,7 +1133,7 @@ int syncPdoProcess(lely::canopen::AsyncMaster& master)
 
         if (!issueNmtCommand(master, lely::canopen::NmtCommand::START,
                              CANOPEN_SLAVE_NODE_ID,
-                             "A04 slave NMT Start")) {
+                             "SYNC/synchronous PDO validation slave NMT Start")) {
             result = 1;
         } else {
             slave_needs_start = false;
@@ -1192,7 +1192,7 @@ int syncPdoProcess(lely::canopen::AsyncMaster& master)
                     master, lely::canopen::NmtCommand::ENTER_PREOP,
                     CANOPEN_SLAVE_NODE_ID, lely::canopen::NmtState::PREOP,
                     std::chrono::milliseconds(CANOPEN_WAIT_TIMEOUT_MS),
-                    "A04 cleanup slave NMT Enter Pre-operational")) {
+                    "SYNC/synchronous PDO validation cleanup slave NMT Enter Pre-operational")) {
                 result = 1;
                 normal_restoration_ready = false;
             } else {
@@ -1203,7 +1203,7 @@ int syncPdoProcess(lely::canopen::AsyncMaster& master)
         if (normal_restoration_ready
             && !restoreTpdoConfiguration(master, original,
                                          completion_wait_timed_out)) {
-            spdlog::error("A04 TPDO1 restoration write failed");
+            spdlog::error("SYNC/synchronous PDO validation TPDO1 restoration write failed");
             result = 1;
             normal_restoration_ready = false;
         }
@@ -1238,7 +1238,7 @@ int syncPdoProcess(lely::canopen::AsyncMaster& master)
      * protocol assertions happened to pass. */
     if (completion_wait_timed_out) {
         spdlog::error(
-            "A04 local SDO completion state remains unknown; TPDO1 "
+            "SYNC/synchronous PDO validation local SDO completion state remains unknown; TPDO1 "
             "restoration cannot be verified");
         result = 1;
     }
@@ -1262,14 +1262,14 @@ int syncPdoProcess(lely::canopen::AsyncMaster& master)
     if (slave_needs_start && slave_start_is_safe) {
         if (!issueNmtCommand(master, lely::canopen::NmtCommand::START,
                              CANOPEN_SLAVE_NODE_ID,
-                             "A04 cleanup slave NMT Start")) {
+                             "SYNC/synchronous PDO validation cleanup slave NMT Start")) {
             result = 1;
         } else {
             slave_needs_start = false;
         }
     } else if (slave_needs_start && !slave_start_is_safe) {
         spdlog::error(
-            "A04 refusing NMT Start because TPDO1 restoration is unverified");
+            "SYNC/synchronous PDO validation refusing NMT Start because TPDO1 restoration is unverified");
         result = 1;
     }
 
@@ -1283,12 +1283,12 @@ int syncPdoProcess(lely::canopen::AsyncMaster& master)
     /* Never hide an unverified restoration behind another test result. */
     if (tpdo_modification_attempted && !restoration_verified) {
         spdlog::error(
-            "A04 TPDO1 may remain changed because restoration was not "
+            "SYNC/synchronous PDO validation TPDO1 may remain changed because restoration was not "
             "verified");
         result = 1;
     }
 
-    /* Step 18 - Remove A04 callbacks before releasing the shared observation
+    /* Step 18 - Remove SYNC/synchronous PDO validation callbacks before releasing the shared observation
      * state or allowing later processes to reuse the same master hooks. */
     if (callbacks_registered) {
         clearCallbacks(master);
@@ -1303,7 +1303,7 @@ int syncPdoProcess(lely::canopen::AsyncMaster& master)
     }
 
     if (result == 0) {
-        spdlog::info("A04 SYNC consumer/synchronous TPDO1 test passed");
+        spdlog::info("SYNC/synchronous PDO validation consumer/synchronous TPDO1 test passed");
     }
     return result;
 }

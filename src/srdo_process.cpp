@@ -1,6 +1,6 @@
 /**
  * @file
- * @brief J09/B09S CANopenNode SRDO protocol validation implementation.
+ * @brief Implements CANopenNode SRDO protocol validation.
  */
 
 #include "srdo_process.h"
@@ -180,11 +180,11 @@ public:
                 if (isWouldBlock(error)) {
                     return true;
                 }
-                spdlog::error("B09S wire drain failed: {}", error.message());
+                spdlog::error("SRDO protocol validation wire drain failed: {}", error.message());
                 return false;
             }
         }
-        spdlog::error("B09S wire drain timed out after {} ms before channel became idle",
+        spdlog::error("SRDO protocol validation wire drain timed out after {} ms before channel became idle",
                       timeout.count());
         return false;
     }
@@ -192,7 +192,7 @@ public:
     bool sendRx(std::uint32_t can_id, const std::uint8_t* data, std::uint8_t dlc) noexcept
     {
         if ((can_id != kRxNormalCanId && can_id != kRxInvertedCanId) || data == nullptr || dlc > 8U) {
-            spdlog::error("B09S fixture rejected frame id=0x{:03x} dlc={}",
+            spdlog::error("SRDO protocol validation fixture rejected frame id=0x{:03x} dlc={}",
                           can_id, static_cast<unsigned int>(dlc));
             return false;
         }
@@ -206,7 +206,7 @@ public:
         std::error_code error;
         channel_.write(message, 500, error);
         if (error) {
-            spdlog::error("B09S wire send failed: id=0x{:03x}: {}", can_id, error.message());
+            spdlog::error("SRDO protocol validation wire send failed: id=0x{:03x}: {}", can_id, error.message());
             return false;
         }
         return true;
@@ -236,7 +236,7 @@ public:
                 if (isWouldBlock(error)) {
                     return WireWaitResult::TIMEOUT;
                 }
-                spdlog::error("B09S wire capture failed: {}", error.message());
+                spdlog::error("SRDO protocol validation wire capture failed: {}", error.message());
                 return WireWaitResult::ERROR;
             }
             if (result == 0) {
@@ -503,7 +503,7 @@ bool readRemoteUntil(lely::canopen::AsyncMaster& master, std::uint16_t index,
 
     const auto budget = remainingBudget(deadline);
     if (budget.count() <= 0) {
-        spdlog::error("B09S remote read budget exhausted: {}", label);
+        spdlog::error("SRDO protocol validation remote read budget exhausted: {}", label);
         return false;
     }
 
@@ -523,17 +523,17 @@ bool readRemoteUntil(lely::canopen::AsyncMaster& master, std::uint16_t index,
         budget, submit_error);
 
     if (submit_error) {
-        spdlog::error("B09S remote read submission failed: {}: {}", label, submit_error.message());
+        spdlog::error("SRDO protocol validation remote read submission failed: {}: {}", label, submit_error.message());
         return false;
     }
 
     std::unique_lock<std::mutex> lock(state->mutex);
     if (!state->condition.wait_until(lock, deadline, [state]() { return state->completed; })) {
-        spdlog::error("B09S remote read timed out within total budget: {}", label);
+        spdlog::error("SRDO protocol validation remote read timed out within total budget: {}", label);
         return false;
     }
     if (state->error) {
-        spdlog::error("B09S remote read failed: {}: {}", label, state->error.message());
+        spdlog::error("SRDO protocol validation remote read failed: {}: {}", label, state->error.message());
         return false;
     }
     value = state->value;
@@ -554,7 +554,7 @@ bool writeRemote(lely::canopen::AsyncMaster& master, std::uint16_t index,
     if (writeRemoteSdo<T>(master, CANOPEN_SLAVE_NODE_ID, index, subindex, value,
                           std::chrono::milliseconds(500), std::chrono::milliseconds(100))
         != SdoOperationResult::SUCCESS) {
-        spdlog::error("B09S remote write failed: {}", label);
+        spdlog::error("SRDO protocol validation remote write failed: {}", label);
         return false;
     }
     return true;
@@ -587,38 +587,38 @@ bool requireWriteRejected(lely::canopen::AsyncMaster& master, std::uint16_t inde
         std::chrono::milliseconds(500), submit_error);
 
     if (submit_error) {
-        spdlog::error("B09S rejection probe submission failed: {}: {}", label, submit_error.message());
+        spdlog::error("SRDO protocol validation rejection probe submission failed: {}: {}", label, submit_error.message());
         return false;
     }
 
     std::unique_lock<std::mutex> lock(state->mutex);
     if (!state->condition.wait_for(lock, std::chrono::milliseconds(600),
                                    [state]() { return state->completed; })) {
-        spdlog::error("B09S rejection probe completion timed out: {}", label);
+        spdlog::error("SRDO protocol validation rejection probe completion timed out: {}", label);
         return false;
     }
     if (!state->error) {
-        spdlog::error("B09S invalid write was unexpectedly accepted: {}", label);
+        spdlog::error("SRDO protocol validation invalid write was unexpectedly accepted: {}", label);
         return false;
     }
     if (state->error.category() != lely::canopen::SdoCategory()) {
-        spdlog::error("B09S rejection probe failed locally instead of receiving SDO abort: {}: {}",
+        spdlog::error("SRDO protocol validation rejection probe failed locally instead of receiving SDO abort: {}: {}",
                       label, state->error.message());
         return false;
     }
 
     const lely::canopen::SdoErrc abort = lely::canopen::sdo_errc(state->error);
     if (abort == lely::canopen::SdoErrc::TIMEOUT) {
-        spdlog::error("B09S invalid write timed out instead of being rejected: {}", label);
+        spdlog::error("SRDO protocol validation invalid write timed out instead of being rejected: {}", label);
         return false;
     }
     if (abort != expected_abort) {
         spdlog::error(
-            "B09S invalid write returned unexpected SDO abort: {} expected=0x{:08x} actual=0x{:08x}",
+            "SRDO protocol validation invalid write returned unexpected SDO abort: {} expected=0x{:08x} actual=0x{:08x}",
             label, static_cast<std::uint32_t>(expected_abort), static_cast<std::uint32_t>(abort));
         return false;
     }
-    spdlog::info("B09S expected SDO rejection: {} abort=0x{:08x}", label,
+    spdlog::info("SRDO protocol validation expected SDO rejection: {} abort=0x{:08x}", label,
                  static_cast<std::uint32_t>(abort));
     return true;
 }
@@ -651,7 +651,7 @@ bool readDiagnosticUntil(lely::canopen::AsyncMaster& master, SrdoDiagnostic& val
             return true;
         }
     }
-    spdlog::error("B09S diagnostic snapshot remained unstable or exhausted its total budget");
+    spdlog::error("SRDO protocol validation diagnostic snapshot remained unstable or exhausted its total budget");
     return false;
 }
 
@@ -683,7 +683,7 @@ bool waitForDiagnosticState(lely::canopen::AsyncMaster& master, std::int8_t expe
         }
         std::this_thread::sleep_for(std::min(kDiagnosticPoll, remainingBudget(deadline)));
     }
-    spdlog::error("B09S state wait timed out: expected rx/tx/agg={}/{}/{}",
+    spdlog::error("SRDO protocol validation state wait timed out: expected rx/tx/agg={}/{}/{}",
                   static_cast<int>(expected_rx), static_cast<int>(expected_tx),
                   static_cast<int>(expected_aggregate));
     return false;
@@ -703,7 +703,7 @@ bool waitForRxState(lely::canopen::AsyncMaster& master, std::int8_t expected,
             return true;
         }
         if (rx_state < 0 && rx_state != expected) {
-            spdlog::error("B09S unexpected RX state: expected={} actual={}",
+            spdlog::error("SRDO protocol validation unexpected RX state: expected={} actual={}",
                           static_cast<int>(expected), static_cast<int>(rx_state));
             return false;
         }
@@ -726,7 +726,7 @@ bool waitForTxState(lely::canopen::AsyncMaster& master, std::int8_t expected,
             return true;
         }
         if (tx_state < 0 && tx_state != expected) {
-            spdlog::error("B09S unexpected TX state: expected={} actual={}",
+            spdlog::error("SRDO protocol validation unexpected TX state: expected={} actual={}",
                           static_cast<int>(expected), static_cast<int>(tx_state));
             return false;
         }
@@ -739,27 +739,27 @@ bool enterPreOperational(CanopenTestMaster& master)
 {
     return issueNmtCommandAndWaitForState(master, lely::canopen::NmtCommand::ENTER_PREOP,
                                           CANOPEN_SLAVE_NODE_ID, lely::canopen::NmtState::PREOP,
-                                          kResetTimeout, "B09S enter Pre-operational");
+                                          kResetTimeout, "SRDO protocol validation enter Pre-operational");
 }
 
 bool enterOperational(CanopenTestMaster& master)
 {
     return issueNmtCommandAndWaitForState(master, lely::canopen::NmtCommand::START,
                                           CANOPEN_SLAVE_NODE_ID, lely::canopen::NmtState::START,
-                                          kResetTimeout, "B09S enter Operational");
+                                          kResetTimeout, "SRDO protocol validation enter Operational");
 }
 
 bool resetCommunication(CanopenTestMaster& master)
 {
     prepareBootWait();
     if (!issueNmtCommand(master, lely::canopen::NmtCommand::RESET_COMM,
-                         CANOPEN_SLAVE_NODE_ID, "B09S Reset Communication")) {
+                         CANOPEN_SLAVE_NODE_ID, "SRDO protocol validation Reset Communication")) {
         return false;
     }
 
     lely::canopen::NmtState state = lely::canopen::NmtState::BOOTUP;
     if (!waitForBootCompletion(kResetTimeout, state)) {
-        spdlog::error("B09S Boot after Reset Communication timed out");
+        spdlog::error("SRDO protocol validation Boot after Reset Communication timed out");
         return false;
     }
     return state == lely::canopen::NmtState::START || enterOperational(master);
@@ -818,7 +818,7 @@ bool readComm(lely::canopen::AsyncMaster& master, std::uint16_t index, SrdoCommP
 bool readMap(lely::canopen::AsyncMaster& master, std::uint16_t index, SrdoMapProfile& map)
 {
     if (!readRemote(master, index, 0x00U, map.count, "SRDO mapping count") || map.count != 2U) {
-        spdlog::error("B09S test profile requires exactly two mapping entries: index=0x{:04x} count={}",
+        spdlog::error("SRDO protocol validation test profile requires exactly two mapping entries: index=0x{:04x} count={}",
                       index, static_cast<unsigned int>(map.count));
         return false;
     }
@@ -860,7 +860,7 @@ bool validateProfile(lely::canopen::AsyncMaster& master, SrdoProfile& profile)
 
     if (!exact_profile) {
         spdlog::error(
-            "B09S profile mismatch: valid=0x{:02x} crc=0x{:04x}/0x{:04x} "
+            "SRDO protocol validation profile mismatch: valid=0x{:02x} crc=0x{:04x}/0x{:04x} "
             "calculated=0x{:04x}/0x{:04x} dir={}/{} SCT={}/{} SRVT={}/{} "
             "ids={:03x}/{:03x}/{:03x}/{:03x}",
             static_cast<unsigned int>(profile.configuration_valid), profile.checksum[0], profile.checksum[1],
@@ -871,7 +871,7 @@ bool validateProfile(lely::canopen::AsyncMaster& master, SrdoProfile& profile)
             profile.comm[1].normal_id, profile.comm[1].inverted_id);
         return false;
     }
-    spdlog::info("B09S profile passed: RX checksum=0x{:04x} TX checksum=0x{:04x}",
+    spdlog::info("SRDO protocol validation profile passed: RX checksum=0x{:04x} TX checksum=0x{:04x}",
                  profile.checksum[0], profile.checksum[1]);
     return true;
 }
@@ -952,7 +952,7 @@ bool waitForTxCompletion(lely::canopen::AsyncMaster& master, std::uint32_t reque
         }
         std::this_thread::sleep_for(std::min(kDiagnosticPoll, remainingBudget(deadline)));
     }
-    spdlog::error("B09S TX request timed out: seq={}", request_seq);
+    spdlog::error("SRDO protocol validation TX request timed out: seq={}", request_seq);
     return false;
 }
 
@@ -1045,7 +1045,7 @@ bool triggerTx(lely::canopen::AsyncMaster& master, SrdoWireFixture& fixture,
     SrdoDiagnostic diagnostic;
     request_result = kTxRequestResultIdle;
     if (!readDiagnostic(master, diagnostic) || diagnostic.tx_request_seq != diagnostic.tx_complete_seq) {
-        spdlog::error("B09S refuses TX trigger with a pending/unreadable request");
+        spdlog::error("SRDO protocol validation refuses TX trigger with a pending/unreadable request");
         return false;
     }
     if (!writeRemote(master, kSrdoDiagnosticIndex, 0x03U, normal_value, "0x2306:03 tx_normal")
@@ -1055,7 +1055,7 @@ bool triggerTx(lely::canopen::AsyncMaster& master, SrdoWireFixture& fixture,
     }
 
     TxRequestOutcome request;
-    if (!requestTxWithBusyRetry(master, fixture, diagnostic.tx_request_seq, request, "B09S triggered TX")) {
+    if (!requestTxWithBusyRetry(master, fixture, diagnostic.tx_request_seq, request, "SRDO protocol validation triggered TX")) {
         return false;
     }
     request_result = request.result;
@@ -1065,11 +1065,11 @@ bool triggerTx(lely::canopen::AsyncMaster& master, SrdoWireFixture& fixture,
 
     if (normal_frame != nullptr || inverted_frame != nullptr) {
         if (normal_frame == nullptr || inverted_frame == nullptr) {
-            spdlog::error("B09S TX capture requires both pair frame outputs");
+            spdlog::error("SRDO protocol validation TX capture requires both pair frame outputs");
             return false;
         }
         TxPairSynchronizer synchronizer(fixture, false);
-        if (!synchronizer.nextPair(kWireTimeout, *normal_frame, *inverted_frame, "B09S triggered TX")) {
+        if (!synchronizer.nextPair(kWireTimeout, *normal_frame, *inverted_frame, "SRDO protocol validation triggered TX")) {
             return false;
         }
     }
@@ -1081,10 +1081,10 @@ bool validateNmtNonOperational(CanopenTestMaster& master)
     if (!enterPreOperational(master)
         || !waitForDiagnosticState(master, kStateNmtNotOperational, kStateNmtNotOperational,
                                    kStateNmtNotOperational)) {
-        spdlog::error("B09S-02 NMT non-operational state mismatch");
+        spdlog::error("SRDO NMT non-operational gate NMT non-operational state mismatch");
         return false;
     }
-    spdlog::info("B09S-02 NMT non-operational state passed");
+    spdlog::info("SRDO NMT non-operational gate NMT non-operational state passed");
     return true;
 }
 
@@ -1096,7 +1096,7 @@ bool validateRxPair(lely::canopen::AsyncMaster& master, SrdoWireFixture& fixture
 
     /* Mapping/state validation is control-plane work and must not consume the
      * 100 ms RX SCT budget. Keep valid RX traffic flowing while the Host reads
-     * only the fields needed by B09S-03/04. */
+     * only the fields needed by the SRDO receive-pair mapping/state checks. */
     ScopedRxPairWorker keepalive(fixture);
     std::uint32_t rx_normal = 0U;
     std::uint32_t rx_inverted = 0U;
@@ -1106,11 +1106,11 @@ bool validateRxPair(lely::canopen::AsyncMaster& master, SrdoWireFixture& fixture
         || !readRemote(master, kSrdoDiagnosticIndex, 0x02U, rx_inverted,
                        "0x2306:02 rx_inverted")
         || !keepalive.ok() || rx_normal != kProbeNormal || rx_inverted != kProbeInverted) {
-        spdlog::error("B09S-04 RX mapping/state validation failed");
+        spdlog::error("SRDO mapped-OD receive check RX mapping/state validation failed");
         return false;
     }
-    spdlog::info("B09S-03 RX valid pair passed");
-    spdlog::info("B09S-04 RX mapped OD passed");
+    spdlog::info("SRDO valid receive-pair check RX valid pair passed");
+    spdlog::info("SRDO mapped-OD receive check RX mapped OD passed");
     return true;
 }
 
@@ -1120,17 +1120,17 @@ bool validateTxPair(lely::canopen::AsyncMaster& master, SrdoWireFixture& fixture
     WireFrame inverted;
     std::int32_t request_result = 0;
     if (!triggerTx(master, fixture, kProbeNormal, kProbeInverted, &normal, &inverted, request_result)
-        || request_result != 0 || !validateWirePair(normal, inverted, kProbeNormal, "B09S-05")) {
-        spdlog::error("B09S-05 TX pair validation failed: result={}", request_result);
+        || request_result != 0 || !validateWirePair(normal, inverted, kProbeNormal, "SRDO transmit-pair check")) {
+        spdlog::error("SRDO transmit-pair check TX pair validation failed: result={}", request_result);
         return false;
     }
     const auto delta = std::chrono::duration_cast<std::chrono::microseconds>(inverted.timestamp - normal.timestamp);
     if (delta.count() > kPairMaxUs) {
-        spdlog::error("B09S-05 pair delay outside SRVT tolerance: {} us limit={} us",
+        spdlog::error("SRDO transmit-pair check pair delay outside SRVT tolerance: {} us limit={} us",
                       delta.count(), kPairMaxUs);
         return false;
     }
-    spdlog::info("B09S-05 TX pair passed: pair_delta_us={}", delta.count());
+    spdlog::info("SRDO transmit-pair check TX pair passed: pair_delta_us={}", delta.count());
     return waitForTxState(master, kStateEstablished);
 }
 
@@ -1178,15 +1178,15 @@ bool validateTxCycles(lely::canopen::AsyncMaster& master, SrdoWireFixture& fixtu
     for (std::size_t i = 0U; i < kTxPairSamples; ++i) {
         WireFrame normal;
         WireFrame inverted;
-        if (!synchronizer.nextPair(kWireTimeout, normal, inverted, "B09S-06")
-            || !validateWirePair(normal, inverted, kProbeNormal, "B09S-06")) {
-            spdlog::error("B09S-06 TX cycle pair {} failed", i);
+        if (!synchronizer.nextPair(kWireTimeout, normal, inverted, "SRDO timing-window check")
+            || !validateWirePair(normal, inverted, kProbeNormal, "SRDO timing-window check")) {
+            spdlog::error("SRDO timing-window check TX cycle pair {} failed", i);
             return false;
         }
         const long long pair_delta = std::chrono::duration_cast<std::chrono::microseconds>(
                                          inverted.timestamp - normal.timestamp).count();
         if (pair_delta < 0 || pair_delta > kPairMaxUs) {
-            spdlog::error("B09S-06 pair delay outside SRVT profile: pair={} us limit={} us", pair_delta, kPairMaxUs);
+            spdlog::error("SRDO timing-window check pair delay outside SRVT profile: pair={} us limit={} us", pair_delta, kPairMaxUs);
             return false;
         }
         pair_delta_us.push_back(pair_delta);
@@ -1195,7 +1195,7 @@ bool validateTxCycles(lely::canopen::AsyncMaster& master, SrdoWireFixture& fixtu
             const long long cycle = std::chrono::duration_cast<std::chrono::microseconds>(
                                         normal.timestamp - previous_normal).count();
             if (cycle < kCycleMinUs || cycle > kCycleMaxUs) {
-                spdlog::error("B09S-06 cycle outside protocol tolerance: cycle={} us expected={}..{} us",
+                spdlog::error("SRDO timing-window check cycle outside protocol tolerance: cycle={} us expected={}..{} us",
                               cycle, kCycleMinUs, kCycleMaxUs);
                 return false;
             }
@@ -1217,19 +1217,19 @@ bool validateTxCycles(lely::canopen::AsyncMaster& master, SrdoWireFixture& fixtu
     const long long pair_avg = pair_sum / static_cast<long long>(pair_delta_us.size());
     const long long cycle_avg = cycle_sum / static_cast<long long>(cycle_delta_us.size());
     if (cycle_avg < kCycleAverageMinUs || cycle_avg > kCycleAverageMaxUs) {
-        spdlog::error("B09S-06 average cycle inconsistent with SCT profile: avg={} us expected={}..{} us",
+        spdlog::error("SRDO timing-window check average cycle inconsistent with SCT profile: avg={} us expected={}..{} us",
                       cycle_avg, kCycleAverageMinUs, kCycleAverageMaxUs);
         return false;
     }
 
     spdlog::info(
-        "B09S-06 SocketCAN receive timestamp evidence: pairs={} intervals={} "
+        "SRDO timing-window check SocketCAN receive timestamp evidence: pairs={} intervals={} "
         "pair_us min/max/avg={}/{}/{} cycle_us min/max/avg={}/{}/{} "
         "configured_SCT_ms={}",
         pair_delta_us.size(), cycle_delta_us.size(), *pair_minmax.first, *pair_minmax.second, pair_avg,
         *cycle_minmax.first, *cycle_minmax.second, cycle_avg, kProfileSctMs);
     spdlog::info(
-        "B09S-06 timing values are protocol/profile evidence only; "
+        "SRDO timing-window check timing values are protocol/profile evidence only; "
         "they are not WCET or a safety timing budget");
     return waitForTxState(master, kStateEstablished);
 }
@@ -1238,7 +1238,7 @@ bool validateResetRebind(CanopenTestMaster& master, SrdoWireFixture& fixture)
 {
     SrdoDiagnostic before;
     if (!readDiagnostic(master, before) || before.tx_request_seq != before.tx_complete_seq) {
-        spdlog::error("B09S-07 refuses reset with a pending TX request");
+        spdlog::error("SRDO reset/rebind and natural-TX check refuses reset with a pending TX request");
         return false;
     }
     if (!enterPreOperational(master) || !fixture.drain() || !resetCommunication(master)) {
@@ -1258,7 +1258,8 @@ bool validateResetRebind(CanopenTestMaster& master, SrdoWireFixture& fixture)
             || after.tx_request_seq != after.tx_complete_seq
             || after.tx_request_result != kTxRequestResultIdle) {
             spdlog::error(
-                "B09S-07 request state changed/replayed across reset: before={}/{} after={}/{} result={}",
+                "SRDO reset/rebind and natural-TX check request state changed/replayed "
+                "across reset: before={}/{} after={}/{} result={}",
                 before.tx_request_seq, before.tx_complete_seq, after.tx_request_seq,
                 after.tx_complete_seq, after.tx_request_result);
             return false;
@@ -1274,8 +1275,8 @@ bool validateResetRebind(CanopenTestMaster& master, SrdoWireFixture& fixture)
         WireFrame normal;
         WireFrame inverted;
         if (!synchronizer.nextPair(kWireTimeout, normal, inverted,
-                                   "B09S-07 natural TX", true)
-            || !validateWirePair(normal, inverted, kProbeNormal, "B09S-07 natural TX")) {
+                                   "SRDO reset/rebind and natural-TX check natural TX", true)
+            || !validateWirePair(normal, inverted, kProbeNormal, "SRDO reset/rebind and natural-TX check natural TX")) {
             return false;
         }
     }
@@ -1291,7 +1292,7 @@ bool validateResetRebind(CanopenTestMaster& master, SrdoWireFixture& fixture)
             || observed.tx_request_seq != observed.tx_complete_seq
             || observed.tx_request_result != kTxRequestResultIdle) {
             spdlog::error(
-                "B09S-07 stale diagnostic TX request was replayed while natural TX continued: "
+                "SRDO reset/rebind and natural-TX check stale diagnostic TX request was replayed while natural TX continued: "
                 "request={}/{} result={}",
                 observed.tx_request_seq, observed.tx_complete_seq, observed.tx_request_result);
             return false;
@@ -1299,12 +1300,14 @@ bool validateResetRebind(CanopenTestMaster& master, SrdoWireFixture& fixture)
     }
 
     if (!validateRxPair(master, fixture)
-        || !validateEstablishedWindow(master, fixture, "B09S-07")
+        || !validateEstablishedWindow(master, fixture, "SRDO reset/rebind and natural-TX check")
         || !validateTxPair(master, fixture)) {
-        spdlog::error("B09S-07 reset/rebind validation failed");
+        spdlog::error("SRDO reset/rebind and natural-TX check reset/rebind validation failed");
         return false;
     }
-    spdlog::info("B09S-07 Reset Communication rebind passed; natural periodic TX was not misclassified as stale replay");
+    spdlog::info(
+        "SRDO reset/rebind and natural-TX check Reset Communication rebind "
+        "passed; natural periodic TX was not misclassified as stale replay");
     return true;
 }
 
@@ -1314,16 +1317,16 @@ bool validateRegression(CanopenTestMaster& master, SrdoWireFixture& fixture)
     const int pdo_result = pdoProcess(master);
     const int sync_result = pdo_result == 0 ? syncPdoProcess(master) : 1;
     if (!keepalive.ok() || pdo_result != 0 || sync_result != 0) {
-        spdlog::error("B09S-08 PDO/SYNC regression failed: keepalive={} pdo={} sync={}",
+        spdlog::error("SRDO ordinary-protocol regression failed: keepalive={} pdo={} sync={}",
                       keepalive.ok(), pdo_result, sync_result);
         return false;
     }
 
     std::uint32_t device_type = 0U;
-    if (!readRemote(master, 0x1000U, 0x00U, device_type, "B09S-08 0x1000 health read")) {
+    if (!readRemote(master, 0x1000U, 0x00U, device_type, "SRDO ordinary-protocol regression 0x1000 health read")) {
         return false;
     }
-    spdlog::info("B09S-08 PDO/SYNC/SDO/NMT regression passed");
+    spdlog::info("SRDO ordinary-protocol regression passed: PDO/SYNC/SDO/NMT");
     return true;
 }
 
@@ -1331,10 +1334,10 @@ bool validateF01(CanopenTestMaster& master, SrdoWireFixture& fixture, const Srdo
 {
     if (!prepareCleanOperational(master, baseline) || !fixture.sendPair(kProbeNormal, kProbeNormal)
         || !waitForRxState(master, kStateRxNotInverted)) {
-        spdlog::error("B09S-F01 wrong inverse was not detected");
+        spdlog::error("SRDO wrong-inverse fault wrong inverse was not detected");
         return false;
     }
-    spdlog::info("B09S-F01 wrong inverse detected as state -2");
+    spdlog::info("SRDO wrong-inverse fault wrong inverse detected as state -2");
     return true;
 }
 
@@ -1349,10 +1352,10 @@ bool validateF02(CanopenTestMaster& master, SrdoWireFixture& fixture, const Srdo
     }
     std::this_thread::sleep_for(kSrvtFaultWait);
     if (!waitForRxState(master, kStateRxTimeoutSrvt, std::chrono::milliseconds(500))) {
-        spdlog::error("B09S-F02 missing inverted frame did not reach SRVT timeout");
+        spdlog::error("SRDO missing-inverted-frame fault missing inverted frame did not reach SRVT timeout");
         return false;
     }
-    spdlog::info("B09S-F02 missing inverted frame detected as state -4");
+    spdlog::info("SRDO missing-inverted-frame fault missing inverted frame detected as state -4");
     return true;
 }
 
@@ -1364,10 +1367,10 @@ bool validateF03(CanopenTestMaster& master, SrdoWireFixture& fixture, const Srdo
     }
     std::this_thread::sleep_for(kSctFaultWait);
     if (!waitForRxState(master, kStateRxTimeoutSct, std::chrono::milliseconds(500))) {
-        spdlog::error("B09S-F03 missing complete pair did not reach SCT timeout");
+        spdlog::error("SRDO incomplete-pair timeout fault missing complete pair did not reach SCT timeout");
         return false;
     }
-    spdlog::info("B09S-F03 missing complete pair detected as state -3");
+    spdlog::info("SRDO incomplete-pair timeout fault missing complete pair detected as state -3");
     return true;
 }
 
@@ -1378,10 +1381,10 @@ bool validateF04(CanopenTestMaster& master, SrdoWireFixture& fixture, const Srdo
     }
     const std::uint8_t short_payload[2] = {0x78U, 0x56U};
     if (!fixture.sendRx(kRxNormalCanId, short_payload, 2U) || !waitForRxState(master, kStateRxShort)) {
-        spdlog::error("B09S-F04 short RX frame was not detected");
+        spdlog::error("SRDO short-frame fault short RX frame was not detected");
         return false;
     }
-    spdlog::info("B09S-F04 short RX detected as state -1");
+    spdlog::info("SRDO short-frame fault short RX detected as state -1");
     return true;
 }
 
@@ -1405,12 +1408,12 @@ bool validateF05(CanopenTestMaster& master, SrdoWireFixture& fixture, const Srdo
         if (!readRemoteUntil(master, kSrdoDiagnosticIndex, 0x06U, rx_state,
                              "F05-A rx_state", sample_deadline)) {
             spdlog::error(
-                "B09S-F05-A RX state sample exceeded {} ms observation budget",
+                "SRDO wrong-frame-order fault-A RX state sample exceeded {} ms observation budget",
                 kF05StateSampleBudget.count());
             return false;
         }
         if (rx_state == kStateEstablished) {
-            spdlog::error("B09S-F05-A inverted-first was temporarily accepted as established");
+            spdlog::error("SRDO wrong-frame-order fault-A inverted-first was temporarily accepted as established");
             return false;
         }
         if (rx_state == kStateRxTimeoutSct) {
@@ -1421,7 +1424,7 @@ bool validateF05(CanopenTestMaster& master, SrdoWireFixture& fixture, const Srdo
             std::min(kDiagnosticPoll, remainingBudget(inverted_first_deadline)));
     }
     if (!inverted_first_timed_out) {
-        spdlog::error("B09S-F05-A inverted-first did not end in SCT timeout");
+        spdlog::error("SRDO wrong-frame-order fault-A inverted-first did not end in SCT timeout");
         return false;
     }
 
@@ -1438,10 +1441,10 @@ bool validateF05(CanopenTestMaster& master, SrdoWireFixture& fixture, const Srdo
     }
     std::this_thread::sleep_for(kSrvtFaultWait);
     if (!waitForRxState(master, kStateRxTimeoutSrvt, std::chrono::milliseconds(500))) {
-        spdlog::error("B09S-F05-B duplicate-normal did not end in SRVT timeout");
+        spdlog::error("SRDO wrong-frame-order fault-B duplicate-normal did not end in SRVT timeout");
         return false;
     }
-    spdlog::info("B09S-F05 wrong-order cases passed");
+    spdlog::info("SRDO wrong-frame-order fault wrong-order cases passed");
     return true;
 }
 
@@ -1454,15 +1457,15 @@ bool validateF06(CanopenTestMaster& master, const SrdoProfile& baseline)
     if (!writeRemote(master, kSrdoChecksumIndex, 0x01U, wrong_checksum, "F06 wrong SRDO1 checksum")
         || !writeRemote(master, kSrdoConfigValidIndex, 0x00U, static_cast<std::uint8_t>(0xA5U), "F06 valid magic")
         || !enterOperational(master) || !waitForRxState(master, kStateErrorConfiguration)) {
-        spdlog::error("B09S-F06 checksum mismatch did not cause configuration error");
+        spdlog::error("SRDO checksum-mismatch fault checksum mismatch did not cause configuration error");
         return false;
     }
     std::uint8_t valid = 0xFFU;
     if (!readRemote(master, kSrdoConfigValidIndex, 0x00U, valid, "F06 0x13FE after fault") || valid != 0U) {
-        spdlog::error("B09S-F06 expected 0x13FE=0 after fault, actual=0x{:02x}", static_cast<unsigned int>(valid));
+        spdlog::error("SRDO checksum-mismatch fault expected 0x13FE=0 after fault, actual=0x{:02x}", static_cast<unsigned int>(valid));
         return false;
     }
-    spdlog::info("B09S-F06 checksum mismatch passed");
+    spdlog::info("SRDO checksum-mismatch fault checksum mismatch passed");
     return true;
 }
 
@@ -1476,7 +1479,7 @@ bool validateF07(CanopenTestMaster& master, const SrdoProfile& baseline)
     if (!writeRemote(master, kSrdo1CommIndex, 0x02U, changed_sct, "F07 legal SCT change")
         || !readRemote(master, kSrdoConfigValidIndex, 0x00U, valid, "F07 0x13FE after parameter write")
         || valid != 0U) {
-        spdlog::error("B09S-F07 parameter write did not clear 0x13FE");
+        spdlog::error("SRDO configuration-validity fault parameter write did not clear 0x13FE");
         return false;
     }
     if (!writeRemote(master, kSrdo1CommIndex, 0x02U, baseline.comm[0].sct_ms, "F07 restore SCT")
@@ -1485,7 +1488,7 @@ bool validateF07(CanopenTestMaster& master, const SrdoProfile& baseline)
         || !enterOperational(master)) {
         return false;
     }
-    spdlog::info("B09S-F07 configuration-valid invalidation passed");
+    spdlog::info("SRDO configuration-validity fault configuration-valid invalidation passed");
     return true;
 }
 
@@ -1507,7 +1510,7 @@ bool validateF08(CanopenTestMaster& master, const SrdoProfile& baseline)
     if (!readRemote(master, kSrdo1CommIndex, 0x05U, current_normal, "F08 preserved normal CAN-ID")
         || !readRemote(master, kSrdo1CommIndex, 0x06U, current_inverted, "F08 preserved inverted CAN-ID")
         || current_normal != baseline.comm[0].normal_id || current_inverted != baseline.comm[0].inverted_id) {
-        spdlog::error("B09S-F08 rejected write changed CAN-ID pair");
+        spdlog::error("SRDO invalid-COB-ID-pair fault rejected write changed CAN-ID pair");
         return false;
     }
 
@@ -1519,10 +1522,10 @@ bool validateF08(CanopenTestMaster& master, const SrdoProfile& baseline)
         || !writeRemote(master, kSrdoChecksumIndex, 0x01U, checksum, "F08 checksum for non-consecutive pair")
         || !writeRemote(master, kSrdoConfigValidIndex, 0x00U, static_cast<std::uint8_t>(0xA5U), "F08 valid magic")
         || !enterOperational(master) || !waitForRxState(master, kStateErrorConfiguration)) {
-        spdlog::error("B09S-F08 non-consecutive pair did not fail configuration");
+        spdlog::error("SRDO invalid-COB-ID-pair fault non-consecutive pair did not fail configuration");
         return false;
     }
-    spdlog::info("B09S-F08 invalid COB-ID checks passed");
+    spdlog::info("SRDO invalid-COB-ID-pair fault invalid COB-ID checks passed");
     return true;
 }
 
@@ -1539,7 +1542,7 @@ bool validateF09(CanopenTestMaster& master, const SrdoProfile& baseline)
     std::uint8_t map_count = 0U;
     if (!readRemote(master, kSrdo1MapIndex, 0x00U, map_count, "F09 preserved mapping count")
         || map_count != baseline.map[0].count) {
-        spdlog::error("B09S-F09 rejected odd count changed mapping count");
+        spdlog::error("SRDO odd-mapping-count fault rejected odd count changed mapping count");
         return false;
     }
     if (!writeRemote(master, kSrdo1CommIndex, 0x01U, baseline.comm[0].direction, "F09 restore direction")
@@ -1548,7 +1551,7 @@ bool validateF09(CanopenTestMaster& master, const SrdoProfile& baseline)
         || !enterOperational(master)) {
         return false;
     }
-    spdlog::info("B09S-F09 odd mapping count rejection passed");
+    spdlog::info("SRDO odd-mapping-count fault odd mapping count rejection passed");
     return true;
 }
 
@@ -1569,15 +1572,15 @@ bool validateF10(CanopenTestMaster& master, const SrdoProfile& baseline)
         || !writeRemote(master, kSrdoChecksumIndex, 0x01U, checksum, "F10 checksum for mismatched map")
         || !writeRemote(master, kSrdoConfigValidIndex, 0x00U, static_cast<std::uint8_t>(0xA5U), "F10 valid magic")
         || !enterOperational(master) || !waitForRxState(master, kStateErrorConfiguration)) {
-        spdlog::error("B09S-F10 mapping length mismatch did not fail configuration");
+        spdlog::error("SRDO mapping-length-mismatch fault mapping length mismatch did not fail configuration");
         return false;
     }
     std::uint8_t valid = 0xFFU;
     if (!readRemote(master, kSrdoConfigValidIndex, 0x00U, valid, "F10 0x13FE after fault") || valid != 0U) {
-        spdlog::error("B09S-F10 expected 0x13FE=0 after fault");
+        spdlog::error("SRDO mapping-length-mismatch fault expected 0x13FE=0 after fault");
         return false;
     }
-    spdlog::info("B09S-F10 mapping length mismatch passed");
+    spdlog::info("SRDO mapping-length-mismatch fault mapping length mismatch passed");
     return true;
 }
 
@@ -1610,7 +1613,7 @@ bool validateF11(CanopenTestMaster& master, SrdoWireFixture& fixture, const Srdo
         const std::uint32_t unexpected_id = observer.unexpectedId();
         if (unexpected_id != 0U) {
             spdlog::error(
-                "B09S-F11 emitted SRDO frame after fault activation before state -6: id=0x{:03x}",
+                "SRDO TX inversion/silence fault emitted SRDO frame after fault activation before state -6: id=0x{:03x}",
                 unexpected_id);
             return false;
         }
@@ -1625,7 +1628,7 @@ bool validateF11(CanopenTestMaster& master, SrdoWireFixture& fixture, const Srdo
             break;
         }
         if (tx_state < 0) {
-            spdlog::error("B09S-F11 unexpected TX state before -6: actual={}",
+            spdlog::error("SRDO TX inversion/silence fault unexpected TX state before -6: actual={}",
                           static_cast<int>(tx_state));
             return false;
         }
@@ -1633,7 +1636,7 @@ bool validateF11(CanopenTestMaster& master, SrdoWireFixture& fixture, const Srdo
     }
 
     if (!fault_observed) {
-        spdlog::error("B09S-F11 TX inversion check did not reach state -6");
+        spdlog::error("SRDO TX inversion/silence fault TX inversion check did not reach state -6");
         return false;
     }
 
@@ -1644,7 +1647,7 @@ bool validateF11(CanopenTestMaster& master, SrdoWireFixture& fixture, const Srdo
         }
         const std::uint32_t unexpected_id = observer.unexpectedId();
         if (unexpected_id != 0U) {
-            spdlog::error("B09S-F11 emitted SRDO frame after TX inversion failure: id=0x{:03x}",
+            spdlog::error("SRDO TX inversion/silence fault emitted SRDO frame after TX inversion failure: id=0x{:03x}",
                           unexpected_id);
             return false;
         }
@@ -1657,26 +1660,26 @@ bool validateF11(CanopenTestMaster& master, SrdoWireFixture& fixture, const Srdo
     }
     const std::uint32_t unexpected_id = observer.unexpectedId();
     if (unexpected_id != 0U) {
-        spdlog::error("B09S-F11 emitted SRDO frame at silence-window boundary: id=0x{:03x}",
+        spdlog::error("SRDO TX inversion/silence fault emitted SRDO frame at silence-window boundary: id=0x{:03x}",
                       unexpected_id);
         return false;
     }
 
-    spdlog::info("B09S-F11 TX data check failure passed: state=-6 and no wire emission");
+    spdlog::info("SRDO TX inversion/silence fault TX data check failure passed: state=-6 and no wire emission");
     return true;
 }
 
 bool validateF12(CanopenTestMaster& master, SrdoWireFixture& fixture, const SrdoProfile& baseline)
 {
     /* F12 is specifically repair + communication reset + sustained valid RX
-     * traffic -> state 3. B09S-05 already covers the explicit TX request path,
+     * traffic -> state 3. SRDO transmit-pair check already covers the explicit TX request path,
      * so do not place unrelated SDO/TX work before the recovery SCT window. */
     if (!prepareCleanOperational(master, baseline)
-        || !validateEstablishedWindow(master, fixture, "B09S-F12")) {
-        spdlog::error("B09S-F12 final recovery failed");
+        || !validateEstablishedWindow(master, fixture, "SRDO final-recovery verification")) {
+        spdlog::error("SRDO final-recovery verification failed");
         return false;
     }
-    spdlog::info("B09S-F12 final recovery passed");
+    spdlog::info("SRDO final-recovery verification passed");
     return true;
 }
 
@@ -1684,20 +1687,20 @@ bool validateF12(CanopenTestMaster& master, SrdoWireFixture& fixture, const Srdo
 
 int srdoProcess(CanopenTestMaster& master, lely::io::CanChannel& wire_channel)
 {
-    spdlog::info("Starting J09/B09S SRDO protocol validation");
+    spdlog::info("Starting SRDO protocol validation");
     SrdoWireFixture fixture(wire_channel);
     SrdoProfile baseline;
 
-    /* B09G and B09S intentionally share one safety wire channel as a sequential
-     * test resource. Start by draining frames left by any preceding safety stage. */
+    /* GFC protocol validation and SRDO protocol validation intentionally share one safety wire channel as a sequential
+     * test resource. Start by draining frames left by any preceding safety-protocol process. */
     if (!fixture.drain() || !validateNmtNonOperational(master) || !validateProfile(master, baseline)) {
-        spdlog::error("J09/B09S SRDO protocol validation FAILED");
+        spdlog::error("SRDO protocol validation FAILED");
         return 1;
     }
 
     const bool passed = enterOperational(master)
         && validateRxPair(master, fixture)
-        && validateEstablishedWindow(master, fixture, "B09S-01")
+        && validateEstablishedWindow(master, fixture, "SRDO established-window baseline")
         && validateTxPair(master, fixture)
         && validateTxCycles(master, fixture)
         && validateResetRebind(master, fixture)
@@ -1717,9 +1720,9 @@ int srdoProcess(CanopenTestMaster& master, lely::io::CanChannel& wire_channel)
 
     if (!passed) {
         if (!prepareCleanOperational(master, baseline)) {
-            spdlog::error("B09S could not restore the SRDO baseline after validation failure");
+            spdlog::error("SRDO protocol validation could not restore the SRDO baseline after validation failure");
         }
-        spdlog::error("J09/B09S SRDO protocol validation FAILED");
+        spdlog::error("SRDO protocol validation FAILED");
         return 1;
     }
 

@@ -1,6 +1,6 @@
 /**
  * @file
- * @brief Implements the J04/B03 master-local Server-SDO test fixture.
+ * @brief Implements the MCU SDO client validation master-local Server-SDO test fixture.
  */
 
 #include "host_sdo_server_fixture.h"
@@ -96,13 +96,13 @@ bool HostSdoServerFixture::install() noexcept
 
     co_dev_t* const dev = master_.localDevice();
     if (dev == nullptr || master_.localServerSdo() == nullptr) {
-        spdlog::error("B03 fixture preflight failed: master SSDO #1 is unavailable");
+        spdlog::error("MCU SDO client validation fixture preflight failed: master SSDO #1 is unavailable");
         return false;
     }
     if (co_dev_find_obj(dev, kU32Index) != nullptr
         || co_dev_find_obj(dev, kOctetsIndex) != nullptr
         || co_dev_find_obj(dev, kReadOnlyIndex) != nullptr) {
-        spdlog::error("B03 fixture object range 0x2F00..0x2F02 is already in use");
+        spdlog::error("MCU SDO client validation fixture object range 0x2F00..0x2F02 is already in use");
         return false;
     }
 
@@ -113,13 +113,13 @@ bool HostSdoServerFixture::install() noexcept
         || co_dev_insert_obj(dev, u32_object_) == -1
         || co_dev_insert_obj(dev, octets_object_) == -1
         || co_dev_insert_obj(dev, readonly_object_) == -1) {
-        spdlog::error("B03 fixture installation failed");
+        spdlog::error("MCU SDO client validation fixture installation failed");
         uninstallLocked();
         return false;
     }
 
     installed_ = true;
-    spdlog::info("B03 master SSDO fixture installed at 0x2F00..0x2F02");
+    spdlog::info("MCU SDO client validation master SSDO fixture installed at 0x2F00..0x2F02");
     return true;
 }
 

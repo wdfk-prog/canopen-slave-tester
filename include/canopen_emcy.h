@@ -36,7 +36,7 @@ struct CanopenEmcyEvent {
 /**
  * @brief Register the single shared EMCY callback on the Lely master.
  *
- * A Lely master has one OnEmcy() callback slot. A01, A06, and future tests
+ * A Lely master has one OnEmcy() callback slot. Heartbeat validation, EMCY producer validation, and future tests
  * therefore consume events from this shared observer instead of replacing one
  * another's callback registration.
  *

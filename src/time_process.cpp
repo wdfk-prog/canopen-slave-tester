@@ -191,7 +191,7 @@ bool readTimeDiagnostic(lely::canopen::AsyncMaster& master,
         if (count_before == count_after && days_before == days_after) {
             if (milliseconds >= kMillisecondsPerDay) {
                 spdlog::error(
-                    "A05 diagnostic milliseconds out of range: {}",
+                    "TIME consumer validation diagnostic milliseconds out of range: {}",
                     milliseconds);
                 return false;
             }
@@ -203,13 +203,13 @@ bool readTimeDiagnostic(lely::canopen::AsyncMaster& master,
         }
 
         spdlog::debug(
-            "A05 diagnostic snapshot changed during SDO reads; retrying "
+            "TIME consumer validation diagnostic snapshot changed during SDO reads; retrying "
             "(attempt={})",
             attempt + 1U);
     }
 
     spdlog::error(
-        "A05 unable to obtain a coherent TIME diagnostic snapshot");
+        "TIME consumer validation unable to obtain a coherent TIME diagnostic snapshot");
     return false;
 }
 
@@ -229,7 +229,7 @@ bool sendTimeFrame(lely::canopen::AsyncMaster& master, std::uint32_t can_id,
 {
     if (can_id > kTimeCanIdMask || dlc > kClassicCanMaxLength) {
         spdlog::error(
-            "A05 invalid TIME injection parameters: can_id=0x{:x} dlc={}",
+            "TIME consumer validation invalid TIME injection parameters: can_id=0x{:x} dlc={}",
             can_id, static_cast<unsigned int>(dlc));
         return false;
     }
@@ -255,7 +255,7 @@ bool sendTimeFrame(lely::canopen::AsyncMaster& master, std::uint32_t can_id,
      * injection while retaining the existing Lely transmit queue. */
     io_can_net_t* io_net = master;
     if (io_can_net_lock(io_net) == -1) {
-        spdlog::error("A05 unable to lock Lely CAN network: errc={}",
+        spdlog::error("TIME consumer validation unable to lock Lely CAN network: errc={}",
                       get_errc());
         return false;
     }
@@ -279,23 +279,23 @@ bool sendTimeFrame(lely::canopen::AsyncMaster& master, std::uint32_t can_id,
     const int unlock_errc = unlock_result == -1 ? get_errc() : 0;
 
     if (raw_net == nullptr) {
-        spdlog::error("A05 Lely CAN network internal interface is null");
+        spdlog::error("TIME consumer validation Lely CAN network internal interface is null");
         return false;
     }
     if (send_result == -1) {
         spdlog::error(
-            "A05 unable to queue TIME frame: can_id=0x{:03x} dlc={} errc={}",
+            "TIME consumer validation unable to queue TIME frame: can_id=0x{:03x} dlc={} errc={}",
             can_id, static_cast<unsigned int>(dlc), send_errc);
         return false;
     }
     if (unlock_result == -1) {
-        spdlog::error("A05 unable to unlock Lely CAN network: errc={}",
+        spdlog::error("TIME consumer validation unable to unlock Lely CAN network: errc={}",
                       unlock_errc);
         return false;
     }
 
     spdlog::info(
-        "A05 TIME frame queued: can_id=0x{:03x} dlc={} days={} ms={}",
+        "TIME consumer validation frame queued: can_id=0x{:03x} dlc={} days={} ms={}",
         can_id, static_cast<unsigned int>(dlc),
         static_cast<unsigned int>(days), milliseconds);
     return true;
@@ -322,7 +322,7 @@ bool waitForRxCount(lely::canopen::AsyncMaster& master,
         if (current_count != previous_count) {
             if (current_count != expected_count) {
                 spdlog::error(
-                    "A05 valid TIME RX count mismatch: expected={} actual={}",
+                    "TIME consumer validation valid TIME RX count mismatch: expected={} actual={}",
                     expected_count, current_count);
                 return false;
             }
@@ -333,7 +333,7 @@ bool waitForRxCount(lely::canopen::AsyncMaster& master,
     }
 
     spdlog::error(
-        "A05 valid TIME reception timed out: rx_count remained {}",
+        "TIME consumer validation valid TIME reception timed out: rx_count remained {}",
         previous_count);
     return false;
 }
@@ -377,7 +377,7 @@ bool waitForAppliedTime(lely::canopen::AsyncMaster& master,
 
         if (last.rx_count != expected_rx_count) {
             spdlog::error(
-                "A05 valid TIME RX count changed while waiting for application: "
+                "TIME consumer validation valid TIME RX count changed while waiting for application: "
                 "expected={} actual={}",
                 expected_rx_count, last.rx_count);
             return false;
@@ -412,14 +412,14 @@ bool waitForAppliedTime(lely::canopen::AsyncMaster& master,
         const std::uint64_t remote_elapsed =
             forwardTimeDelta(sent, observed);
         spdlog::error(
-            "A05 applied TIME did not converge before timeout: sent days={} "
+            "TIME consumer validation applied TIME did not converge before timeout: sent days={} "
             "ms={} observed days={} ms={} remote_elapsed={} ms "
             "host_elapsed={} ms",
             static_cast<unsigned int>(sent_days), sent_milliseconds,
             static_cast<unsigned int>(last.days), last.milliseconds,
             remote_elapsed, host_elapsed.count());
     } else {
-        spdlog::error("A05 applied TIME wait ended without a diagnostic snapshot");
+        spdlog::error("TIME consumer validation applied TIME wait ended without a diagnostic snapshot");
     }
     return false;
 }
@@ -472,7 +472,7 @@ bool validateContinuousAdvance(const TimeDiagnostic& before,
     const std::uint32_t rx_count_delta = after.rx_count - before.rx_count;
     if (rx_count_delta != expected_rx_count_delta) {
         spdlog::error(
-            "A05 valid TIME RX count delta mismatch: expected={} actual={} "
+            "TIME consumer validation valid TIME RX count delta mismatch: expected={} actual={} "
             "before={} after={}",
             expected_rx_count_delta, rx_count_delta, before.rx_count,
             after.rx_count);
@@ -498,7 +498,7 @@ bool validateContinuousAdvance(const TimeDiagnostic& before,
 
     if (remote_elapsed < minimum || remote_elapsed > maximum) {
         spdlog::error(
-            "A05 TIME progression out of tolerance: remote={} ms host={} ms "
+            "TIME consumer validation progression out of tolerance: remote={} ms host={} ms "
             "allowed=[{}, {}] ms",
             remote_elapsed, host_elapsed.count(), minimum, maximum);
         return false;
@@ -537,7 +537,7 @@ bool writeAndVerifyTimeCobId(lely::canopen::AsyncMaster& master,
     }
     if (read_back != value) {
         spdlog::error(
-            "A05 0x1012 read-back mismatch: expected=0x{:08x} "
+            "TIME consumer validation 0x1012 read-back mismatch: expected=0x{:08x} "
             "actual=0x{:08x}",
             value, read_back);
         return false;
@@ -584,7 +584,7 @@ bool verifyTimeCobId(lely::canopen::AsyncMaster& master,
     }
     if (actual != expected) {
         spdlog::error(
-            "A05 restored 0x1012 mismatch: expected=0x{:08x} "
+            "TIME consumer validation restored 0x1012 mismatch: expected=0x{:08x} "
             "actual=0x{:08x}",
             expected, actual);
         return false;
@@ -605,10 +605,10 @@ bool recoverTimeCobIdWithReset(lely::canopen::AsyncMaster& master,
                                bool& slave_needs_start)
 {
     spdlog::warn(
-        "A05 recovering unverified TIME configuration with Reset Communication");
+        "TIME consumer validation recovering unverified TIME configuration with Reset Communication");
 
     if (!resetSlaveCommunication(
-            master, "A05 recovery boundary Reset Communication")) {
+            master, "TIME consumer validation recovery boundary Reset Communication")) {
         slave_needs_start = true;
         return false;
     }
@@ -623,7 +623,7 @@ bool recoverTimeCobIdWithReset(lely::canopen::AsyncMaster& master,
     /* Reinitialize CO_TIME from the restored OD value so an initially disabled
      * consumer does not retain the temporary receive-buffer registration. */
     if (!resetSlaveCommunication(
-            master, "A05 restore-state Reset Communication")) {
+            master, "TIME consumer validation restore-state Reset Communication")) {
         return false;
     }
     slave_needs_start = true;
@@ -633,7 +633,7 @@ bool recoverTimeCobIdWithReset(lely::canopen::AsyncMaster& master,
         return false;
     }
 
-    spdlog::info("A05 original 0x1012 restored and runtime reinitialized");
+    spdlog::info("TIME consumer validation original 0x1012 restored and runtime reinitialized");
     return true;
 }
 
@@ -660,12 +660,12 @@ bool verifyInvalidDlc(lely::canopen::AsyncMaster& master,
         return false;
     }
     if (!validateContinuousAdvance(before, after)) {
-        spdlog::error("A05 invalid DLC {} changed applied TIME state",
+        spdlog::error("TIME consumer validation invalid DLC {} changed applied TIME state",
                       static_cast<unsigned int>(dlc));
         return false;
     }
 
-    spdlog::info("A05 invalid DLC {} ignored as expected",
+    spdlog::info("TIME consumer validation invalid DLC {} ignored as expected",
                  static_cast<unsigned int>(dlc));
     return true;
 }
@@ -691,7 +691,7 @@ int timeProcess(lely::canopen::AsyncMaster& master)
     TimeDiagnostic baseline{};
     if (!readTimeDiagnostic(master, baseline, completion_wait_timed_out)) {
         spdlog::error(
-            "A05 TIME diagnostic 0x2300:01..03 is unavailable or invalid");
+            "TIME consumer validation diagnostic 0x2300:01..03 is unavailable or invalid");
         return 1;
     }
 
@@ -706,14 +706,14 @@ int timeProcess(lely::canopen::AsyncMaster& master)
 
     if ((original_cob_id & kTimeUnsupportedCobIdMask) != 0U) {
         spdlog::error(
-            "A05 unsupported TIME 0x1012 value for current CANopenNode target: "
+            "TIME consumer validation unsupported TIME 0x1012 value for current CANopenNode target: "
             "0x{:08x}",
             original_cob_id);
         return 1;
     }
     if ((original_cob_id & kTimeProducerMask) != 0U) {
         spdlog::error(
-            "A05 requires the slave to remain a TIME consumer only; "
+            "TIME consumer validation requires the slave to remain a TIME consumer only; "
             "0x1012=0x{:08x} enables producer role",
             original_cob_id);
         return 1;
@@ -735,7 +735,7 @@ int timeProcess(lely::canopen::AsyncMaster& master)
         }
         if (result == 0) {
             if (!resetSlaveCommunication(
-                    master, "A05 enable-consumer Reset Communication")) {
+                    master, "TIME consumer validation enable-consumer Reset Communication")) {
                 reset_recovery_required = true;
                 result = 1;
             } else {
@@ -855,7 +855,7 @@ int timeProcess(lely::canopen::AsyncMaster& master)
                     } else {
                         if (!validateContinuousAdvance(before, after, 1U)) {
                             spdlog::error(
-                                "A05 disabled TIME consumer handling mismatch");
+                                "TIME consumer validation disabled TIME consumer handling mismatch");
                             result = 1;
                         }
                     }
@@ -876,7 +876,7 @@ int timeProcess(lely::canopen::AsyncMaster& master)
         }
     }
 
-    /* Step 11: normal cleanup writes the exact original 0x1012. If A05 had to
+    /* Step 11: normal cleanup writes the exact original 0x1012. If TIME consumer validation had to
      * reset after enabling an initially disabled consumer, reset once more after
      * restoration so the runtime receive-buffer configuration also matches the
      * entry state, not only the OD value. */
@@ -887,7 +887,7 @@ int timeProcess(lely::canopen::AsyncMaster& master)
                                     completion_wait_timed_out);
         if (normal_restore_ok && consumer_enable_reset_performed) {
             if (!resetSlaveCommunication(
-                    master, "A05 cleanup Reset Communication")) {
+                    master, "TIME consumer validation cleanup Reset Communication")) {
                 normal_restore_ok = false;
             } else {
                 slave_needs_start = true;
@@ -919,17 +919,17 @@ int timeProcess(lely::canopen::AsyncMaster& master)
 
     if (completion_wait_timed_out) {
         spdlog::error(
-            "A05 local SDO completion state remains unknown after cleanup");
+            "TIME consumer validation local SDO completion state remains unknown after cleanup");
         result = 1;
     }
 
-    /* Any A05 communication reset leaves the node in Boot-managed state. The
-     * automatic sequence expects the slave Operational for later stages, so
-     * restore that established post-A03/A04 process convention. */
+    /* Any TIME consumer validation communication reset leaves the node in Boot-managed state. The
+     * automatic sequence expects the slave Operational for later processes, so
+     * restore that established post-PDO/SYNC validation process convention. */
     if (slave_needs_start && restoration_verified) {
         if (!issueNmtCommand(master, lely::canopen::NmtCommand::START,
                              CANOPEN_SLAVE_NODE_ID,
-                             "A05 cleanup slave NMT Start")) {
+                             "TIME consumer validation cleanup slave NMT Start")) {
             result = 1;
         } else {
             slave_needs_start = false;
@@ -938,13 +938,13 @@ int timeProcess(lely::canopen::AsyncMaster& master)
 
     if (cob_id_modification_attempted && !restoration_verified) {
         spdlog::error(
-            "A05 slave 0x1012 may remain changed because restoration was not "
+            "TIME consumer validation slave 0x1012 may remain changed because restoration was not "
             "verified");
         result = 1;
     }
 
     if (result == 0) {
-        spdlog::info("A05 TIME consumer test passed");
+        spdlog::info("TIME consumer validation passed");
     }
     return result;
 }

@@ -69,7 +69,7 @@ constexpr std::size_t kRpdoPayloadLength = 4;
 
 /** Monotonic clock used for interval measurements unaffected by wall time. */
 using Clock = std::chrono::steady_clock;
-/** Lely PDO callback signature used when unregistering A03 callbacks. */
+/** Lely PDO callback signature used when unregistering PDO validation callbacks. */
 using PdoCallback =
     std::function<void(int, std::error_code, const void*, std::size_t)>;
 
@@ -80,7 +80,7 @@ struct TpdoSample {
     Clock::time_point timestamp{}; /**< Monotonic receive time; epoch default until filled. */
 };
 
-/** Shared TPDO receive state written by the event loop and read by A03. */
+/** Shared TPDO receive state written by the event loop and read by PDO validation. */
 struct TpdoReceiveState {
     std::mutex mutex; /**< Protects all callback-published fields. */
     std::condition_variable condition; /**< Wakes waits on sample/failure changes. */
@@ -120,7 +120,7 @@ std::uint32_t decodeLe32(const std::uint8_t* data) noexcept
 }
 
 /**
- * @brief Register the PDO callbacks used by A03.
+ * @brief Register the PDO callbacks used by PDO validation.
  *
  * @param master Active Lely asynchronous CANopen master.
  * @param receive_state Shared TPDO receive state.
@@ -202,7 +202,7 @@ void registerPdoCallbacks(
 }
 
 /**
- * @brief Remove the PDO callbacks installed by A03.
+ * @brief Remove the PDO callbacks installed by PDO validation.
  *
  * @param master Active Lely asynchronous CANopen master.
  */
@@ -229,19 +229,19 @@ bool waitForTpdoSamples(const std::shared_ptr<TpdoReceiveState>& state)
                 return state->failed
                        || state->sample_count >= kTpdoSampleCount;
             })) {
-        spdlog::error("A03 TPDO1 sampling timed out: received={}/{}",
+        spdlog::error("PDO validation TPDO1 sampling timed out: received={}/{}",
                       state->sample_count, kTpdoSampleCount);
         return false;
     }
 
     if (state->failed) {
         if (state->error) {
-            spdlog::error("A03 TPDO1 processing failed: {}",
+            spdlog::error("PDO validation TPDO1 processing failed: {}",
                           state->error.message());
         } else if (state->null_payload) {
-            spdlog::error("A03 TPDO1 callback returned a null payload");
+            spdlog::error("PDO validation TPDO1 callback returned a null payload");
         } else {
-            spdlog::error("A03 TPDO1 length mismatch: expected={} actual={}",
+            spdlog::error("PDO validation TPDO1 length mismatch: expected={} actual={}",
                           kTpdoPayloadLength, state->invalid_length);
         }
         return false;
@@ -288,7 +288,7 @@ bool validateTpdoSamples(const std::shared_ptr<TpdoReceiveState>& state)
             std::chrono::duration_cast<std::chrono::milliseconds>(
                 samples[i].timestamp - samples[0].timestamp);
         spdlog::info(
-            "A03 TPDO1 sample[{}] t=+{} ms: 0x2100:00=0x{:08x} "
+            "PDO validation TPDO1 sample[{}] t=+{} ms: 0x2100:00=0x{:08x} "
             "0x2101:00=0x{:08x}",
             i, offset.count(), value1, value2);
 
@@ -303,11 +303,11 @@ bool validateTpdoSamples(const std::shared_ptr<TpdoReceiveState>& state)
         /* Convert to signed arithmetic so bounds remain valid if configuration
          * changes toward smaller periods/tolerances in the future. */
         const std::int64_t interval_ms = interval.count();
-        spdlog::info("A03 TPDO1 interval[{}]={} ms", i, interval_ms);
+        spdlog::info("PDO validation TPDO1 interval[{}]={} ms", i, interval_ms);
         if (interval_ms < minimum_interval_ms
             || interval_ms > maximum_interval_ms) {
             spdlog::error(
-                "A03 TPDO1 period out of tolerance: expected={}+/-{} ms "
+                "PDO validation TPDO1 period out of tolerance: expected={}+/-{} ms "
                 "actual={} ms",
                 kTpdoPeriodMs, kTpdoToleranceMs, interval_ms);
             return false;
@@ -337,7 +337,7 @@ bool readMappedTpdoValue(lely::canopen::AsyncMaster& master,
                 .Read<std::uint32_t>(error);
     if (error) {
         spdlog::error(
-            "A03 unable to read TPDO-mapped object 0x{:04x}:{:02x}: {}",
+            "PDO validation unable to read TPDO-mapped object 0x{:04x}:{:02x}: {}",
             index, static_cast<unsigned int>(subindex), error.message());
         return false;
     }
@@ -404,7 +404,7 @@ bool verifyTpdoOdConsistency(
         /* Zero means no TPDO generation has been captured yet. */
         std::size_t generation = 0;
         if (!getLatestTpdoSample(state, sample, generation)) {
-            spdlog::error("A03 TPDO1 has no valid sample for OD comparison");
+            spdlog::error("PDO validation TPDO1 has no valid sample for OD comparison");
             return false;
         }
 
@@ -458,35 +458,35 @@ bool verifyTpdoOdConsistency(
 
         if (!isTpdoGenerationStable(state, generation)) {
             spdlog::info(
-                "A03 TPDO1 changed during OD comparison; retrying ({}/{})",
+                "PDO validation TPDO1 changed during OD comparison; retrying ({}/{})",
                 attempt + 1U, kConsistencyRetryCount);
             continue;
         }
 
         if (mapped_value1 != raw_value1 || mapped_value2 != raw_value2) {
             spdlog::error(
-                "A03 TPDO1 mapped value mismatch: raw=(0x{:08x},0x{:08x}) "
+                "PDO validation TPDO1 mapped value mismatch: raw=(0x{:08x},0x{:08x}) "
                 "mapped=(0x{:08x},0x{:08x})",
                 raw_value1, raw_value2, mapped_value1, mapped_value2);
             return false;
         }
         if (sdo_value1 != raw_value1 || sdo_value2 != raw_value2) {
             spdlog::error(
-                "A03 TPDO1/OD mismatch: TPDO=(0x{:08x},0x{:08x}) "
+                "PDO validation TPDO1/OD mismatch: TPDO=(0x{:08x},0x{:08x}) "
                 "SDO=(0x{:08x},0x{:08x})",
                 raw_value1, raw_value2, sdo_value1, sdo_value2);
             return false;
         }
 
         spdlog::info(
-            "A03 TPDO1 mapping/OD verified: 0x2100:00=0x{:08x} "
+            "PDO validation TPDO1 mapping/OD verified: 0x2100:00=0x{:08x} "
             "0x2101:00=0x{:08x}",
             raw_value1, raw_value2);
         return true;
     }
 
     spdlog::error(
-        "A03 TPDO1 changed during all {} OD comparison attempts",
+        "PDO validation TPDO1 changed during all {} OD comparison attempts",
         kConsistencyRetryCount);
     return false;
 }
@@ -524,13 +524,13 @@ bool sendRpdoValue(lely::canopen::AsyncMaster& master,
                                     [kRpdoTestSubindex];
     mapped.Write(value, error);
     if (error) {
-        spdlog::error("A03 unable to write RPDO-mapped 0x2200:00: {}",
+        spdlog::error("PDO validation unable to write RPDO-mapped 0x2200:00: {}",
                       error.message());
         return false;
     }
     mapped.WriteEvent(error);
     if (error) {
-        spdlog::error("A03 unable to trigger RPDO1 transmission: {}",
+        spdlog::error("PDO validation unable to trigger RPDO1 transmission: {}",
                       error.message());
         return false;
     }
@@ -541,18 +541,18 @@ bool sendRpdoValue(lely::canopen::AsyncMaster& master,
     if (!state->condition.wait_for(
             lock, std::chrono::milliseconds(kRpdoTransmitTimeoutMs),
             [state]() { return state->completed; })) {
-        spdlog::error("A03 RPDO1 transmission callback timed out");
+        spdlog::error("PDO validation RPDO1 transmission callback timed out");
         return false;
     }
     if (state->error) {
-        spdlog::error("A03 RPDO1 transmission failed: {}",
+        spdlog::error("PDO validation RPDO1 transmission failed: {}",
                       state->error.message());
         return false;
     }
     if (state->pdo_number != kPdoNumber
         || state->length != kRpdoPayloadLength) {
         spdlog::error(
-            "A03 RPDO1 transmission mismatch: pdo={} expected_dlc={} "
+            "PDO validation RPDO1 transmission mismatch: pdo={} expected_dlc={} "
             "actual_dlc={}",
             state->pdo_number, kRpdoPayloadLength, state->length);
         return false;
@@ -563,12 +563,12 @@ bool sendRpdoValue(lely::canopen::AsyncMaster& master,
     const std::uint32_t payload_value = decodeLe32(state->payload.data());
     if (payload_value != value) {
         spdlog::error(
-            "A03 RPDO1 payload mismatch: expected=0x{:08x} actual=0x{:08x}",
+            "PDO validation RPDO1 payload mismatch: expected=0x{:08x} actual=0x{:08x}",
             value, payload_value);
         return false;
     }
 
-    spdlog::info("A03 RPDO1 transmitted: 0x2200:00=0x{:08x}", value);
+    spdlog::info("PDO validation RPDO1 transmitted: 0x2200:00=0x{:08x}", value);
     return true;
 }
 
@@ -599,7 +599,7 @@ bool restoreRpdoTestValue(lely::canopen::AsyncMaster& master,
     }
     if (write_result == SdoOperationResult::SDO_TIMEOUT) {
         spdlog::warn(
-            "A03 restore SDO response timed out; verifying 0x2200:00 by "
+            "PDO validation restore SDO response timed out; verifying 0x2200:00 by "
             "read-back");
     }
 
@@ -618,13 +618,13 @@ bool restoreRpdoTestValue(lely::canopen::AsyncMaster& master,
     }
     if (restored_value != original_value) {
         spdlog::error(
-            "A03 restored 0x2200:00 mismatch: expected=0x{:08x} "
+            "PDO validation restored 0x2200:00 mismatch: expected=0x{:08x} "
             "actual=0x{:08x}",
             original_value, restored_value);
         return false;
     }
 
-    spdlog::info("A03 original 0x2200:00 restored: 0x{:08x}",
+    spdlog::info("PDO validation original 0x2200:00 restored: 0x{:08x}",
                  restored_value);
     return true;
 }
@@ -633,7 +633,7 @@ bool restoreRpdoTestValue(lely::canopen::AsyncMaster& master,
 
 int pdoProcess(lely::canopen::AsyncMaster& master)
 {
-    /* Shared receive state starts empty because A03 must collect a fresh TPDO
+    /* Shared receive state starts empty because PDO validation must collect a fresh TPDO
      * sample set after the callbacks are installed. */
     const auto receive_state = std::make_shared<TpdoReceiveState>();
     /* Shared transmit state starts incomplete because no RPDO probe has been
@@ -653,10 +653,10 @@ int pdoProcess(lely::canopen::AsyncMaster& master)
     std::uint32_t original_value = 0;
 
     /* Step 1: keep the local master Operational so its PDO services remain
-     * active while A03 collects and transmits PDO traffic. */
+     * active while PDO validation collects and transmits PDO traffic. */
     if (!issueNmtCommand(master, lely::canopen::NmtCommand::START,
                          CANOPEN_MASTER_NODE_ID,
-                         "A03 local master NMT Start")) {
+                         "PDO validation local master NMT Start")) {
         result = 1;
     }
 
@@ -665,7 +665,7 @@ int pdoProcess(lely::canopen::AsyncMaster& master)
     if (result == 0
         && !issueNmtCommand(master, lely::canopen::NmtCommand::START,
                             CANOPEN_SLAVE_NODE_ID,
-                            "A03 slave NMT Start")) {
+                            "PDO validation slave NMT Start")) {
         result = 1;
     }
     /* Step 3: TPDO1 is event-driven (transmission type 254) with a 1000 ms
@@ -697,7 +697,7 @@ int pdoProcess(lely::canopen::AsyncMaster& master)
             result = 1;
         } else {
             original_value_saved = true;
-            spdlog::info("A03 saved original 0x2200:00=0x{:08x}",
+            spdlog::info("PDO validation saved original 0x2200:00=0x{:08x}",
                          original_value);
         }
     }
@@ -729,11 +729,11 @@ int pdoProcess(lely::canopen::AsyncMaster& master)
             result = 1;
         } else if (read_back_value != probe_value) {
             spdlog::error(
-                "A03 RPDO1/OD mismatch: expected=0x{:08x} actual=0x{:08x}",
+                "PDO validation RPDO1/OD mismatch: expected=0x{:08x} actual=0x{:08x}",
                 probe_value, read_back_value);
             result = 1;
         } else {
-            spdlog::info("A03 RPDO1 OD update verified: 0x2200:00=0x{:08x}",
+            spdlog::info("PDO validation RPDO1 OD update verified: 0x2200:00=0x{:08x}",
                          read_back_value);
         }
     }
@@ -745,27 +745,27 @@ int pdoProcess(lely::canopen::AsyncMaster& master)
         if (!completion_wait_timed_out
             && !restoreRpdoTestValue(master, original_value,
                                      completion_wait_timed_out)) {
-            spdlog::error("A03 0x2200:00 restoration was not verified");
+            spdlog::error("PDO validation 0x2200:00 restoration was not verified");
             result = 1;
         }
 
         if (completion_wait_timed_out) {
             spdlog::warn(
-                "A03 local SDO completion state is unknown; attempting "
+                "PDO validation local SDO completion state is unknown; attempting "
                 "best-effort RPDO restoration without SDO verification");
             if (!sendRpdoValue(master, transmit_state, original_value)) {
-                spdlog::error("A03 best-effort RPDO restoration failed");
+                spdlog::error("PDO validation best-effort RPDO restoration failed");
             }
             result = 1;
         }
     }
 
-    /* Step 8: always unregister A03 callbacks so later stages do not consume
-     * stale TPDO/RPDO events through A03 state objects. */
+    /* Step 8: always unregister PDO validation callbacks so later processes do not consume
+     * stale TPDO/RPDO events through PDO validation state objects. */
     clearPdoCallbacks(master);
 
     if (result == 0) {
-        spdlog::info("A03 RPDO/TPDO test passed");
+        spdlog::info("PDO validation RPDO/TPDO test passed");
     }
     return result;
 }

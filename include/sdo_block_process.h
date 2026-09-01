@@ -1,12 +1,12 @@
 /**
  * @file
- * @brief J06/B02 SDO Server Block Transfer validation interface.
+ * @brief SDO server block-transfer validation interface.
  */
 
 #ifndef SDO_BLOCK_PROCESS_H
 #define SDO_BLOCK_PROCESS_H
 
-/** Enable J06/B02 SDO Server Block Transfer validation. */
+/** Enable SDO server block-transfer validation. */
 #define CANOPEN_ENABLE_SDO_BLOCK_PROCESS 0
 
 class CanopenTestMaster;

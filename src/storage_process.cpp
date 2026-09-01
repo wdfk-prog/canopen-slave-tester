@@ -1,6 +1,6 @@
 /**
  * @file
- * @brief J07/B01 CANopenNode EEPROM Storage validation implementation.
+ * @brief Implements CANopenNode EEPROM storage persistence validation.
  */
 
 #include "storage_process.h"
@@ -44,9 +44,9 @@ constexpr std::uint8_t kCommStorageSubindex = 0x02U;
 constexpr std::uint32_t kSaveMagic = 0x65766173UL;
 /** CANopenNode "load" command value in little-endian numeric form. */
 constexpr std::uint32_t kRestoreMagic = 0x64616F6CUL;
-/** AT24C128 capacity required by the J07 target profile. */
+/** AT24C128 capacity required by the Storage integration validation target profile. */
 constexpr std::uint32_t kExpectedEepromSize = 16384U;
-/** AT24C128 page size required by the J07 target profile. */
+/** AT24C128 page size required by the Storage integration validation target profile. */
 constexpr std::uint16_t kExpectedPageSize = 64U;
 /** AddrInput 1 selects the supplied AT24CXX adapter's 7-bit address 0x51. */
 constexpr std::uint8_t kExpectedAddrInput = 1U;
@@ -63,7 +63,7 @@ constexpr auto kDiagnosticPoll = std::chrono::milliseconds(20);
 enum class DiagnosticSubindex : std::uint8_t {
     REQUEST_SEQ = 0x01U, /**< Host commit sequence written after request fields are prepared. */
     COMMAND = 0x02U, /**< Storage diagnostic command selector. */
-    ENTRY_SUB_INDEX = 0x03U, /**< Selected 0x1010/0x1011 Storage sub-index; B01 requires 2. */
+    ENTRY_SUB_INDEX = 0x03U, /**< Selected 0x1010/0x1011 Storage sub-index; Storage persistence validation requires 2. */
     RAW_OFFSET = 0x04U, /**< Byte offset relative to the complete diagnostic raw region. */
     RAW_SIZE = 0x05U, /**< Number of raw bytes transferred by one diagnostic command. */
     RAW_VALUE = 0x06U, /**< Little-endian raw read/write payload, up to four bytes. */
@@ -136,7 +136,7 @@ struct StartupSnapshot {
     std::uint16_t probe = 0U; /**< Pre-master 0x1017 value loaded from Storage. */
 };
 
-/** Complete host-side recovery baseline required before destructive B01 cases. */
+/** Complete host-side recovery baseline required before destructive Storage persistence validation cases. */
 struct StorageBaseline {
     StorageLayout layout; /**< Layout associated with raw bytes. */
     StartupSnapshot startup; /**< Initial persisted startup evidence. */
@@ -278,7 +278,7 @@ bool validateLayout(const StorageLayout& layout)
         || layout.data_address < layout.signature_address || data_end != raw_end
         || raw_end > layout.eeprom_size || layout.data_length > 0xFFFFU) {
         spdlog::error(
-            "B01-01 Storage layout mismatch: offset=0x{:x} size={} page={} addrInput={} "
+            "Storage layout/addressing mismatch: offset=0x{:x} size={} page={} addrInput={} "
             "sig=0x{:x} data=0x{:x}/{} raw=0x{:x}/{}",
             layout.storage_offset, layout.eeprom_size, layout.page_size,
             static_cast<unsigned int>(layout.addr_input), layout.signature_address,
@@ -286,7 +286,7 @@ bool validateLayout(const StorageLayout& layout)
         return false;
     }
     spdlog::info(
-        "B01-01 passed: AT24C128 size={} page={} AddrInput={} (7-bit address 0x51), "
+        "Storage layout/addressing check passed: AT24C128 size={} page={} AddrInput={} (7-bit address 0x51), "
         "Storage raw=[0x{:x},0x{:x})",
         layout.eeprom_size, layout.page_size, static_cast<unsigned int>(layout.addr_input),
         layout.raw_start, static_cast<std::uint32_t>(raw_end));
@@ -354,12 +354,12 @@ bool captureBaseline(lely::canopen::AsyncMaster& master, StorageBaseline& baseli
 
     baseline.raw_crc = crc16Ccitt(baseline.raw);
     if (baseline.raw_crc != target_backup_crc) {
-        spdlog::error("B01-03 baseline CRC mismatch: host=0x{:04x} target=0x{:04x}",
+        spdlog::error("Storage raw baseline CRC mismatch: host=0x{:04x} target=0x{:04x}",
                       baseline.raw_crc, target_backup_crc);
         return false;
     }
     baseline.captured = true;
-    spdlog::info("B01-03 passed: complete raw baseline captured, len={} crc=0x{:04x}",
+    spdlog::info("Storage raw baseline snapshot passed: complete raw baseline captured, len={} crc=0x{:04x}",
                  baseline.raw.size(), baseline.raw_crc);
     return true;
 }
@@ -373,7 +373,7 @@ bool suspendHeartbeatConsumer(lely::canopen::AsyncMaster& master,
         kHeartbeatConsumerIndex, kHeartbeatConsumerSubindex, error);
     if (error) {
         spdlog::error(
-            "B01 unable to read local 0x1016:{:02x} before expected outage: {}",
+            "Storage persistence validation unable to read local 0x1016:{:02x} before expected outage: {}",
             static_cast<unsigned int>(kHeartbeatConsumerSubindex),
             error.message());
         return false;
@@ -383,14 +383,14 @@ bool suspendHeartbeatConsumer(lely::canopen::AsyncMaster& master,
                                 kHeartbeatConsumerSubindex, 0U, error);
     if (error) {
         spdlog::error(
-            "B01 unable to suspend local 0x1016:{:02x} before expected outage: {}",
+            "Storage persistence validation unable to suspend local 0x1016:{:02x} before expected outage: {}",
             static_cast<unsigned int>(kHeartbeatConsumerSubindex),
             error.message());
         return false;
     }
 
     spdlog::info(
-        "B01 expected outage window started: local 0x1016:{:02x} "
+        "Storage persistence validation expected outage window started: local 0x1016:{:02x} "
         "0x{:08x} -> 0",
         static_cast<unsigned int>(kHeartbeatConsumerSubindex),
         saved_consumer);
@@ -407,14 +407,14 @@ bool restoreHeartbeatConsumer(lely::canopen::AsyncMaster& master,
                                 error);
     if (error) {
         spdlog::error(
-            "B01 unable to restore local 0x1016:{:02x}=0x{:08x}: {}",
+            "Storage persistence validation unable to restore local 0x1016:{:02x}=0x{:08x}: {}",
             static_cast<unsigned int>(kHeartbeatConsumerSubindex),
             saved_consumer, error.message());
         return false;
     }
 
     spdlog::info(
-        "B01 expected outage window ended: local 0x1016:{:02x} restored "
+        "Storage persistence validation expected outage window ended: local 0x1016:{:02x} restored "
         "to 0x{:08x}",
         static_cast<unsigned int>(kHeartbeatConsumerSubindex),
         saved_consumer);
@@ -454,11 +454,16 @@ bool validateStorageObjects(lely::canopen::AsyncMaster& master)
         || readRemoteSdo(master, CANOPEN_SLAVE_NODE_ID, kRestoreIndex, kCommStorageSubindex,
                          restore_capability) != SdoOperationResult::SUCCESS
         || (save_capability & 1U) == 0U || (restore_capability & 1U) == 0U) {
-        spdlog::error("B01-02 0x1010:02/0x1011:02 capability check failed: save=0x{:08x} restore=0x{:08x}",
+        spdlog::error(
+            "Storage save/restore command capability check failed: "
+            "0x1010:02=0x{:08x} 0x1011:02=0x{:08x}",
                       save_capability, restore_capability);
         return false;
     }
-    spdlog::info("B01-02 passed: save=0x{:08x} restore=0x{:08x}", save_capability, restore_capability);
+    spdlog::info(
+        "Storage save/restore command capability passed: "
+        "save=0x{:08x} restore=0x{:08x}",
+        save_capability, restore_capability);
     return true;
 }
 
@@ -513,18 +518,20 @@ bool expectBaselineStartup(lely::canopen::AsyncMaster& master, const StartupSnap
 bool cleanupBaseline(lely::canopen::AsyncMaster& master, const StorageBaseline& baseline)
 {
     if (!baseline.captured || !restoreRawRegion(master, baseline)
-        || !resetNodeAndWait(master, "B01 cleanup Reset Node")
+        || !resetNodeAndWait(master, "Storage persistence validation cleanup Reset Node")
         || !expectBaselineStartup(master, baseline.startup)
         || writeRemoteSdo(master, CANOPEN_SLAVE_NODE_ID, kProbeIndex, 0x00U, baseline.runtime_probe)
             != SdoOperationResult::SUCCESS) {
-        spdlog::critical("B01 cleanup failed; environment=DIRTY. Stop all later destructive Storage stages.");
+        spdlog::critical(
+            "Storage persistence validation cleanup failed; environment=DIRTY. "
+            "Stop all later destructive Storage processes.");
         return false;
     }
-    spdlog::info("B01 cleanup verified after reload; environment=CLEAN");
+    spdlog::info("Storage persistence validation cleanup verified after reload; environment=CLEAN");
     return true;
 }
 
-/** B01-01..B01-07: core layout, backup/restore, save and reset persistence. */
+/** Core storage validation: layout, backup/restore, save, reset persistence, and repeated-save replacement. */
 int runCoreMode(lely::canopen::AsyncMaster& master)
 {
     StorageLayout layout;
@@ -538,7 +545,7 @@ int runCoreMode(lely::canopen::AsyncMaster& master)
     }
     bool passed = true;
 
-    /* B01-04 proves target-RAM BACKUP/RESTORE covers every raw byte, not only OD data. */
+    /* Storage RAM backup/restore proves target-RAM BACKUP/RESTORE covers every raw byte, not only OD data. */
     const std::uint32_t data_offset = baseline.layout.data_address - baseline.layout.raw_start;
     const std::uint8_t mutated = static_cast<std::uint8_t>(baseline.raw[data_offset] ^ 0x01U);
     if (!runDiagnosticCommand(master, DiagnosticCommand::RAW_WRITE, data_offset, 1U, mutated)
@@ -548,7 +555,7 @@ int runCoreMode(lely::canopen::AsyncMaster& master)
         std::vector<std::uint8_t> restored;
         passed = readRawRegion(master, baseline.layout, restored) && restored == baseline.raw;
     }
-    spdlog::info("B01-04 {}: target raw backup/restore", passed ? "passed" : "failed");
+    spdlog::info("Storage RAM backup/restore {}: target raw backup/restore", passed ? "passed" : "failed");
 
     const std::uint16_t probe1 = chooseProbe(baseline.runtime_probe, 0x0555U);
     const std::uint16_t probe2 = chooseProbe(probe1, 0x0666U);
@@ -559,26 +566,26 @@ int runCoreMode(lely::canopen::AsyncMaster& master)
     } else {
         passed = false;
     }
-    spdlog::info("B01-05 {}: 0x1017 + 0x1010:02 save", passed ? "passed" : "failed");
+    spdlog::info("Storage heartbeat save {}: 0x1017 + 0x1010:02 save", passed ? "passed" : "failed");
 
     if (passed) {
-        passed = resetNodeAndWait(master, "B01-06 Reset Node")
+        passed = resetNodeAndWait(master, "Storage reset persistence Reset Node")
             && expectStartup(master, StartupState::OK, probe1, false);
     }
-    spdlog::info("B01-06 {}: reset persistence via pre-master startup probe", passed ? "passed" : "failed");
+    spdlog::info("Storage reset persistence {}: reset persistence via pre-master startup probe", passed ? "passed" : "failed");
 
     if (passed) {
         passed = saveProbe(master, probe2)
-            && resetNodeAndWait(master, "B01-07 Reset Node")
+            && resetNodeAndWait(master, "Storage repeated-save replacement Reset Node")
             && expectStartup(master, StartupState::OK, probe2, false);
     }
-    spdlog::info("B01-07 {}: repeated save replaces persistent value", passed ? "passed" : "failed");
+    spdlog::info("Storage repeated-save replacement {}: repeated save replaces persistent value", passed ? "passed" : "failed");
 
     const bool cleaned = cleanupBaseline(master, baseline);
     return passed && cleaned ? 0 : 1;
 }
 
-/** B01-08..B01-10: restore-default signature invalidation and baseline recovery. */
+/** Restore-default signature invalidation and raw-baseline recovery checks. */
 int runRestoreMode(lely::canopen::AsyncMaster& master)
 {
     StorageBaseline baseline;
@@ -596,16 +603,16 @@ int runRestoreMode(lely::canopen::AsyncMaster& master)
         StorageLayout layout;
         passed = readLayout(master, layout) && layout.signature_value == 0xFFFFFFFFUL;
     }
-    spdlog::info("B01-08 {}: 0x1011:02 invalidates the COMM signature", passed ? "passed" : "failed");
+    spdlog::info("Storage restore-defaults invalidation {}: 0x1011:02 invalidates the COMM signature", passed ? "passed" : "failed");
 
     if (passed) {
-        passed = resetNodeAndWait(master, "B01-09 Reset Node after restore defaults")
+        passed = resetNodeAndWait(master, "Storage erased-signature detection Reset Node after restore defaults")
             && expectStartup(master, StartupState::DATA_CORRUPT, kFactoryProbe, true);
     }
-    spdlog::info("B01-09 {}: erased signature is detected at startup", passed ? "passed" : "failed");
+    spdlog::info("Storage erased-signature detection {}: erased signature is detected at startup", passed ? "passed" : "failed");
 
     const bool cleaned = cleanupBaseline(master, baseline);
-    spdlog::info("B01-10 {}: full original raw baseline restored", cleaned ? "passed" : "failed");
+    spdlog::info("Storage raw baseline restore {}: full original raw baseline restored", cleaned ? "passed" : "failed");
     return passed && cleaned ? 0 : 1;
 }
 
@@ -615,7 +622,7 @@ bool stageValidImage(lely::canopen::AsyncMaster& master, std::uint16_t probe)
     return saveProbe(master, probe);
 }
 
-/** B01-11..B01-13: signature and payload corruption detection plus recovery. */
+/** Signature/payload corruption detection and baseline recovery checks. */
 int runCorruptionMode(lely::canopen::AsyncMaster& master)
 {
     StorageBaseline baseline;
@@ -628,11 +635,11 @@ int runCorruptionMode(lely::canopen::AsyncMaster& master)
 
     if (!stageValidImage(master, signature_probe)
         || !runDiagnosticCommand(master, DiagnosticCommand::CORRUPT_SIGNATURE)
-        || !resetNodeAndWait(master, "B01-11 Reset Node after signature corruption")
+        || !resetNodeAndWait(master, "Storage signature-corruption detection Reset Node after signature corruption")
         || !expectStartup(master, StartupState::DATA_CORRUPT, kFactoryProbe, true)) {
         passed = false;
     }
-    spdlog::info("B01-11 {}: signature corruption detected", passed ? "passed" : "failed");
+    spdlog::info("Storage signature-corruption detection {}: signature corruption detected", passed ? "passed" : "failed");
 
     if (passed) {
         /* Restore the exact initial image before staging the independent data-corruption case. */
@@ -645,14 +652,17 @@ int runCorruptionMode(lely::canopen::AsyncMaster& master)
         if (passed) {
             const std::uint32_t data_offset = layout.data_address - layout.raw_start;
             passed = runDiagnosticCommand(master, DiagnosticCommand::CORRUPT_DATA, data_offset, 1U)
-                && resetNodeAndWait(master, "B01-12 Reset Node after payload corruption")
+                && resetNodeAndWait(master, "Storage payload-CRC corruption detection Reset Node after payload corruption")
                 && expectStartup(master, StartupState::DATA_CORRUPT, data_probe, true);
         }
     }
-    spdlog::info("B01-12 {}: payload CRC corruption detected", passed ? "passed" : "failed");
+    spdlog::info("Storage payload-CRC corruption detection {}: payload CRC corruption detected", passed ? "passed" : "failed");
 
     const bool cleaned = cleanupBaseline(master, baseline);
-    spdlog::info("B01-13 {}: corruption cleanup restored complete baseline", cleaned ? "passed" : "failed");
+    spdlog::info(
+        "Storage corruption cleanup/recovery {}: corruption cleanup restored "
+        "complete baseline",
+        cleaned ? "passed" : "failed");
     return passed && cleaned ? 0 : 1;
 }
 
@@ -674,7 +684,7 @@ bool waitForOperatorPowerCycle(lely::canopen::AsyncMaster& master,
     return boot_completed && supervision_restored;
 }
 
-/** B01-14..B01-15: persisted save and baseline recovery across real power cycles. */
+/** Persistence and baseline recovery across operator-driven power cycles. */
 int runPowerCycleMode(lely::canopen::AsyncMaster& master)
 {
     StorageBaseline baseline;
@@ -687,26 +697,26 @@ int runPowerCycleMode(lely::canopen::AsyncMaster& master)
     if (!saveProbe(master, probe)) {
         passed = false;
     } else {
-        passed = waitForOperatorPowerCycle(master, "B01-14")
+        passed = waitForOperatorPowerCycle(master, "Storage power-cycle persistence")
             && expectStartup(master, StartupState::OK, probe, false);
     }
-    spdlog::info("B01-14 {}: save survived a physical power cycle", passed ? "passed" : "failed");
+    spdlog::info("Storage power-cycle persistence {}: save survived a physical power cycle", passed ? "passed" : "failed");
 
     if (passed) {
         passed = restoreRawRegion(master, baseline);
     }
     if (passed) {
-        passed = waitForOperatorPowerCycle(master, "B01-15")
+        passed = waitForOperatorPowerCycle(master, "Storage power-cycle baseline recovery")
             && expectStartup(master, baseline.startup.state, baseline.startup.probe,
                              baseline.startup.state == StartupState::DATA_CORRUPT);
     }
-    spdlog::info("B01-15 {}: baseline survived the recovery power cycle", passed ? "passed" : "failed");
+    spdlog::info("Storage power-cycle recovery {}: baseline survived the power cycle", passed ? "passed" : "failed");
 
     const bool cleaned = cleanupBaseline(master, baseline);
     return passed && cleaned ? 0 : 1;
 }
 
-/** B01-16: operator cuts power during 0x1010 save and result is classified after reboot. */
+/** Storage interrupted-save classification: operator cuts power during 0x1010 save and result is classified after reboot. */
 int runPowerInterruptionMode(lely::canopen::AsyncMaster& master)
 {
     StorageBaseline baseline;
@@ -730,15 +740,16 @@ int runPowerInterruptionMode(lely::canopen::AsyncMaster& master)
         } else {
             prepareBootWait();
             spdlog::warn(
-                "B01-16 ACTION REQUIRED: cut MCU power during the following 0x1010 save, then restore power");
+                "Storage interrupted-save classification ACTION REQUIRED: cut MCU "
+                "power during the following 0x1010 save, then restore power");
             save_result = writeRemoteSdo(master, CANOPEN_SLAVE_NODE_ID, kStoreIndex,
                                          kCommStorageSubindex, kSaveMagic);
             if (save_result == SdoOperationResult::SUCCESS) {
-                spdlog::error("B01-16 save completed before power interruption was observed");
+                spdlog::error("Storage interrupted-save classification save completed before power interruption was observed");
                 passed = false;
             } else if (!waitForBootCompletion(
                            std::chrono::milliseconds(CANOPEN_STORAGE_OPERATOR_TIMEOUT_MS))) {
-                spdlog::error("B01-16 no fresh Boot observed after the interrupted save");
+                spdlog::error("Storage interrupted-save classification no fresh Boot observed after the interrupted save");
                 passed = false;
             }
             if (!restoreHeartbeatConsumer(master, saved_consumer)) {
@@ -758,12 +769,14 @@ int runPowerInterruptionMode(lely::canopen::AsyncMaster& master)
             passed = false;
         }
         if (!passed) {
-            spdlog::error("B01-16 post-interruption Storage image was neither detected corrupt nor a valid old/new commit");
+            spdlog::error(
+                "Storage interrupted-save classification: post-interruption Storage "
+                "image was neither corrupt nor a valid old/new commit");
         }
     }
 
     const bool cleaned = cleanupBaseline(master, baseline);
-    spdlog::info("B01-16 {}: power-interruption outcome classified and baseline restored",
+    spdlog::info("Storage interrupted-save classification {}: power-interruption outcome classified and baseline restored",
                  passed && cleaned ? "passed" : "failed");
     return passed && cleaned ? 0 : 1;
 }
@@ -774,7 +787,7 @@ int storageProcess(lely::canopen::AsyncMaster& master)
 {
     const char* mode_env = std::getenv(CANOPEN_STORAGE_MODE_ENV);
     const std::string mode = mode_env == nullptr ? "core" : mode_env;
-    spdlog::info("J07/B01 Storage process started: mode={}", mode);
+    spdlog::info("Storage persistence validation process started: mode={}", mode);
 
     if (mode == "core") {
         return runCoreMode(master);

@@ -1,6 +1,6 @@
 /**
  * @file
- * @brief Implements J03/B09G Global Fail-safe Command protocol validation.
+ * @brief Implements Global Fail-safe Command (GFC) protocol validation.
  */
 
 #include "gfc_process.h"
@@ -47,7 +47,7 @@ constexpr std::uint8_t kGfcProducerCompleteSubindex = 0x04U;
 /** Return value from the most recent MCU CO_GFCsend() call. */
 constexpr std::uint8_t kGfcProducerResultSubindex = 0x05U;
 
-/** Short protocol timeout for J03 SDO transactions. */
+/** Short protocol timeout for GFC integration validation SDO transactions. */
 constexpr std::uint32_t kSdoTimeoutMs = 500U;
 /** Local callback completion margin after the protocol timeout. */
 constexpr std::uint32_t kSdoCompletionMarginMs = 100U;
@@ -97,7 +97,7 @@ struct GfcWireFrame {
 };
 
 /**
- * @brief Stage-local fixed GFC wire fixture on a dedicated Lely CanChannel.
+ * @brief Process-local fixed GFC wire fixture on a dedicated Lely CanChannel.
  */
 class GfcWireFixture {
 public:
@@ -123,7 +123,7 @@ public:
                 if (isWouldBlock(error)) {
                     return true;
                 }
-                spdlog::error("B09G wire drain failed: {}", error.message());
+                spdlog::error("GFC protocol validation wire drain failed: {}", error.message());
                 return false;
             }
             if (result == 0) {
@@ -135,7 +135,7 @@ public:
     /**
      * @brief Send the fixed GFC CAN-ID with a caller-selected DLC.
      *
-     * DLC 0 is the valid GFC wire format. J03 uses DLC 1 only for the explicit
+     * DLC 0 is the valid GFC wire format. GFC integration validation uses DLC 1 only for the explicit
      * malformed-length negative case; arbitrary CAN-ID/payload transmission is
      * intentionally not exposed.
      *
@@ -145,7 +145,7 @@ public:
     bool send(std::uint8_t dlc) noexcept
     {
         if (dlc > 1U) {
-            spdlog::error("B09G fixture rejects unsupported DLC {}",
+            spdlog::error("GFC protocol validation fixture rejects unsupported DLC {}",
                           static_cast<unsigned int>(dlc));
             return false;
         }
@@ -161,7 +161,7 @@ public:
         std::error_code error;
         channel_.write(message, kWireWriteTimeoutMs, error);
         if (error) {
-            spdlog::error("B09G GFC wire send failed: {}", error.message());
+            spdlog::error("GFC protocol validation wire send failed: {}", error.message());
             return false;
         }
         return true;
@@ -200,7 +200,7 @@ public:
                 if (isWouldBlock(error)) {
                     break;
                 }
-                spdlog::error("B09G wire capture failed: {}", error.message());
+                spdlog::error("GFC protocol validation wire capture failed: {}", error.message());
                 return WireWaitResult::ERROR;
             }
             if (result == 0) {
@@ -240,11 +240,11 @@ private:
         return static_cast<int>(value);
     }
 
-    lely::io::CanChannel& channel_; /**< Dedicated stage-local CAN channel. */
+    lely::io::CanChannel& channel_; /**< Dedicated process-local CAN channel. */
 };
 
 /**
- * @brief Read one J03 remote object using the stage-local SDO budget.
+ * @brief Read one GFC integration validation remote object using the process-local SDO budget.
  */
 template <class T>
 bool readRemote(lely::canopen::AsyncMaster& master,
@@ -256,14 +256,14 @@ bool readRemote(lely::canopen::AsyncMaster& master,
             std::chrono::milliseconds(kSdoTimeoutMs),
             std::chrono::milliseconds(kSdoCompletionMarginMs))
         != SdoOperationResult::SUCCESS) {
-        spdlog::error("B09G remote read failed: {}", label);
+        spdlog::error("GFC protocol validation remote read failed: {}", label);
         return false;
     }
     return true;
 }
 
 /**
- * @brief Write one J03 remote object using the stage-local SDO budget.
+ * @brief Write one GFC integration validation remote object using the process-local SDO budget.
  */
 template <class T>
 bool writeRemote(lely::canopen::AsyncMaster& master,
@@ -275,7 +275,7 @@ bool writeRemote(lely::canopen::AsyncMaster& master,
             std::chrono::milliseconds(kSdoTimeoutMs),
             std::chrono::milliseconds(kSdoCompletionMarginMs))
         != SdoOperationResult::SUCCESS) {
-        spdlog::error("B09G remote write failed: {}", label);
+        spdlog::error("GFC protocol validation remote write failed: {}", label);
         return false;
     }
     return true;
@@ -314,7 +314,7 @@ bool requireInvalidGfcParameterRejected(lely::canopen::AsyncMaster& master)
 
     if (submit_error) {
         spdlog::error(
-            "B09G invalid 0x1300 write could not be submitted: {}",
+            "GFC protocol validation invalid 0x1300 write could not be submitted: {}",
             submit_error.message());
         return false;
     }
@@ -326,27 +326,27 @@ bool requireInvalidGfcParameterRejected(lely::canopen::AsyncMaster& master)
                 kSdoTimeoutMs + kSdoCompletionMarginMs),
             [state]() { return state->completed; })) {
         spdlog::error(
-            "B09G invalid 0x1300 write completion timed out; "
+            "GFC protocol validation invalid 0x1300 write completion timed out; "
             "remote transaction state is unknown");
         return false;
     }
 
     if (!state->error) {
-        spdlog::error("B09G invalid 0x1300 value 2 was unexpectedly accepted");
+        spdlog::error("GFC protocol validation invalid 0x1300 value 2 was unexpectedly accepted");
         return false;
     }
 
     const lely::canopen::SdoErrc abort = lely::canopen::sdo_errc(state->error);
     if (abort != lely::canopen::SdoErrc::PARAM_VAL) {
         spdlog::error(
-            "B09G invalid 0x1300 returned wrong SDO abort: "
+            "GFC protocol validation invalid 0x1300 returned wrong SDO abort: "
             "expected=0x06090030 actual=0x{:08x} ({})",
             static_cast<std::uint32_t>(abort), state->error.message());
         return false;
     }
 
     spdlog::info(
-        "B09G invalid 0x1300 value was rejected with PARAM_VAL 0x06090030");
+        "GFC protocol validation invalid 0x1300 value was rejected with PARAM_VAL 0x06090030");
     return true;
 }
 
@@ -399,7 +399,7 @@ bool waitForRxIncrement(lely::canopen::AsyncMaster& master,
         }
         if (count != baseline) {
             spdlog::error(
-                "B09G unexpected GFC callback count: baseline={} expected={} actual={}",
+                "GFC protocol validation unexpected GFC callback count: baseline={} expected={} actual={}",
                 baseline, expected, count);
             return false;
         }
@@ -407,7 +407,7 @@ bool waitForRxIncrement(lely::canopen::AsyncMaster& master,
             std::chrono::milliseconds(kDiagnosticPollIntervalMs));
     } while (std::chrono::steady_clock::now() < deadline);
 
-    spdlog::error("B09G GFC callback timed out: baseline={} expected={}",
+    spdlog::error("GFC protocol validation callback timed out: baseline={} expected={}",
                   baseline, expected);
     return false;
 }
@@ -428,7 +428,7 @@ bool requireRxUnchanged(lely::canopen::AsyncMaster& master,
         }
         if (count != baseline) {
             spdlog::error(
-                "B09G invalid/disabled GFC changed callback count: baseline={} actual={}",
+                "GFC protocol validation invalid/disabled GFC changed callback count: baseline={} actual={}",
                 baseline, count);
             return false;
         }
@@ -502,7 +502,7 @@ bool waitForProducerCompletion(lely::canopen::AsyncMaster& master,
             }
             if (confirm_seq != request_seq) {
                 spdlog::error(
-                    "B09G producer completion changed during result read: expected={} actual={}",
+                    "GFC protocol validation producer completion changed during result read: expected={} actual={}",
                     request_seq, confirm_seq);
                 return false;
             }
@@ -512,7 +512,7 @@ bool waitForProducerCompletion(lely::canopen::AsyncMaster& master,
             std::chrono::milliseconds(kDiagnosticPollIntervalMs));
     } while (std::chrono::steady_clock::now() < deadline);
 
-    spdlog::error("B09G producer request timed out: request_seq={}",
+    spdlog::error("GFC protocol validation producer request timed out: request_seq={}",
                   request_seq);
     return false;
 }
@@ -541,7 +541,7 @@ bool validateProducerFrame(const GfcWireFrame& frame)
     const can_msg& message = frame.message;
     if (message.id != kGfcCanId || message.flags != 0U || message.len != 0U) {
         spdlog::error(
-            "B09G producer wire mismatch: id=0x{:x} flags=0x{:x} dlc={}",
+            "GFC protocol validation producer wire mismatch: id=0x{:x} flags=0x{:x} dlc={}",
             static_cast<unsigned int>(message.id),
             static_cast<unsigned int>(message.flags),
             static_cast<unsigned int>(message.len));
@@ -549,7 +549,7 @@ bool validateProducerFrame(const GfcWireFrame& frame)
     }
 
     spdlog::info(
-        "B09G producer wire frame passed: id=0x001 dlc=0 timestamp_ns={}",
+        "GFC protocol validation producer wire frame passed: id=0x001 dlc=0 timestamp_ns={}",
         frame.timestamp.count());
     return true;
 }
@@ -568,7 +568,7 @@ bool validateConsumerCases(CanopenTestMaster& master,
 
     std::uint32_t observed = diagnostic.rx_count;
     if (!sendAndValidateConsumer(master, fixture, diagnostic.rx_count,
-                                 observed, "B09G-01 valid consumer")) {
+                                 observed, "GFC valid-consumer delivery")) {
         return false;
     }
     diagnostic.rx_count = observed;
@@ -581,10 +581,10 @@ bool validateConsumerCases(CanopenTestMaster& master,
         || !requireRxUnchanged(
             master, diagnostic.rx_count,
             std::chrono::milliseconds(kNegativeObservationMs))) {
-        spdlog::error("B09G-02 disabled consumer accepted a GFC");
+        spdlog::error("GFC disabled-consumer gate accepted a GFC while disabled");
         return false;
     }
-    spdlog::info("B09G-02 valid=0 consumer gate passed");
+    spdlog::info("GFC disabled-consumer gate passed: valid=0");
 
     /* Values greater than one are outside the standard GFC parameter domain.
      * Require CANopenNode's specific Invalid value for parameter SDO abort. */
@@ -597,11 +597,11 @@ bool validateConsumerCases(CanopenTestMaster& master,
                     current_valid, "0x1300 after invalid value")
         || current_valid != 0U) {
         spdlog::error(
-            "B09G invalid 0x1300 write changed the parameter: expected=0 actual={}",
+            "GFC protocol validation invalid 0x1300 write changed the parameter: expected=0 actual={}",
             static_cast<unsigned int>(current_valid));
         return false;
     }
-    spdlog::info("B09G invalid 0x1300 value was rejected and baseline preserved");
+    spdlog::info("GFC protocol validation invalid 0x1300 value was rejected and baseline preserved");
 
     if (!writeRemote(master, kGfcParameterIndex, kScalarSubindex,
                      static_cast<std::uint8_t>(1U), "restore 0x1300 valid=1")) {
@@ -611,20 +611,20 @@ bool validateConsumerCases(CanopenTestMaster& master,
         || !requireRxUnchanged(
             master, diagnostic.rx_count,
             std::chrono::milliseconds(kNegativeObservationMs))) {
-        spdlog::error("B09G-03 invalid DLC was accepted as a GFC");
+        spdlog::error("GFC invalid-DLC check accepted an invalid-DLC frame as GFC");
         return false;
     }
-    spdlog::info("B09G-03 invalid DLC rejection passed");
+    spdlog::info("GFC invalid-DLC rejection passed");
 
     for (unsigned int i = 0U; i < 3U; ++i) {
         const std::uint32_t baseline = diagnostic.rx_count;
         if (!sendAndValidateConsumer(master, fixture, baseline,
-                                     observed, "B09G-05 continuous GFC")) {
+                                     observed, "GFC continuous-delivery sample")) {
             return false;
         }
         diagnostic.rx_count = observed;
     }
-    spdlog::info("B09G-05 continuous GFC count passed");
+    spdlog::info("GFC continuous-delivery count passed");
     return true;
 }
 
@@ -637,7 +637,7 @@ bool validateProducerCases(CanopenTestMaster& master,
 {
     if (diagnostic.producer_request_seq != diagnostic.producer_complete_seq) {
         spdlog::error(
-            "B09G refuses producer test with pending request: request={} complete={}",
+            "GFC protocol validation refuses producer test with pending request: request={} complete={}",
             diagnostic.producer_request_seq,
             diagnostic.producer_complete_seq);
         return false;
@@ -666,14 +666,14 @@ bool validateProducerCases(CanopenTestMaster& master,
     }
     if (disabled_wait == WireWaitResult::FRAME) {
         spdlog::error(
-            "B09G disabled producer emitted CAN-ID 0x001: flags=0x{:x} dlc={}",
+            "GFC protocol validation disabled producer emitted CAN-ID 0x001: flags=0x{:x} dlc={}",
             static_cast<unsigned int>(unexpected.message.flags),
             static_cast<unsigned int>(unexpected.message.len));
         return false;
     }
     if (producer_result != 0) {
         spdlog::error(
-            "B09G disabled producer returned an unexpected CO_GFCsend result: {}",
+            "GFC protocol validation disabled producer returned an unexpected CO_GFCsend result: {}",
             producer_result);
         return false;
     }
@@ -681,7 +681,7 @@ bool validateProducerCases(CanopenTestMaster& master,
     diagnostic.producer_complete_seq = request_seq;
     diagnostic.producer_result = producer_result;
     spdlog::info(
-        "B09G producer valid=0 gate passed: CO_GFCsend result={}",
+        "GFC protocol validation producer valid=0 gate passed: CO_GFCsend result={}",
         producer_result);
 
     if (!writeRemote(master, kGfcParameterIndex, kScalarSubindex,
@@ -703,12 +703,12 @@ bool validateProducerCases(CanopenTestMaster& master,
         return false;
     }
     if (producer_wait == WireWaitResult::TIMEOUT) {
-        spdlog::error("B09G-04 did not capture MCU-produced GFC");
+        spdlog::error("GFC producer wire-format check did not capture MCU-produced GFC");
         return false;
     }
     if (producer_result != 0) {
         spdlog::error(
-            "B09G-04 MCU CO_GFCsend failed despite a completed request: result={}",
+            "GFC producer wire-format check MCU CO_GFCsend failed despite a completed request: result={}",
             producer_result);
         return false;
     }
@@ -719,7 +719,7 @@ bool validateProducerCases(CanopenTestMaster& master,
     diagnostic.producer_request_seq = request_seq;
     diagnostic.producer_complete_seq = request_seq;
     diagnostic.producer_result = producer_result;
-    spdlog::info("B09G-04 producer wire-format test passed: result={}",
+    spdlog::info("GFC producer wire-format check passed: result={}",
                  producer_result);
     return true;
 }
@@ -737,7 +737,7 @@ bool validateResetRebind(CanopenTestMaster& master,
     prepareBootWait();
     if (!issueNmtCommand(master, lely::canopen::NmtCommand::RESET_COMM,
                          CANOPEN_SLAVE_NODE_ID,
-                         "B09G Reset Communication")) {
+                         "GFC protocol validation Reset Communication")) {
         return false;
     }
     state.reset_communication_issued = true;
@@ -746,7 +746,7 @@ bool validateResetRebind(CanopenTestMaster& master,
     lely::canopen::NmtState boot_state = lely::canopen::NmtState::BOOTUP;
     if (!waitForBootCompletion(
             std::chrono::milliseconds(CANOPEN_WAIT_TIMEOUT_MS), boot_state)) {
-        spdlog::error("B09G-06 Boot after Reset Communication timed out");
+        spdlog::error("GFC reset/rebind verification Boot after Reset Communication timed out");
         return false;
     }
     state.remote_operational_restored =
@@ -758,13 +758,13 @@ bool validateResetRebind(CanopenTestMaster& master,
     }
     if (post_reset.rx_count != pre_reset_count) {
         spdlog::error(
-            "B09G-06 GFC rx_count changed across Reset Communication: before={} after={}",
+            "GFC reset/rebind verification rx_count changed across Reset Communication: before={} after={}",
             pre_reset_count, post_reset.rx_count);
         return false;
     }
     if (post_reset.producer_request_seq != post_reset.producer_complete_seq) {
         spdlog::error(
-            "B09G-06 producer request became pending across reset: request={} complete={}",
+            "GFC reset/rebind verification producer request became pending across reset: request={} complete={}",
             post_reset.producer_request_seq,
             post_reset.producer_complete_seq);
         return false;
@@ -784,7 +784,7 @@ bool validateResetRebind(CanopenTestMaster& master,
 
     std::uint32_t observed = post_reset.rx_count;
     if (!sendAndValidateConsumer(master, fixture, post_reset.rx_count,
-                                 observed, "B09G-06 reset callback rebind")) {
+                                 observed, "GFC reset/rebind verification reset callback rebind")) {
         return false;
     }
     post_reset.rx_count = observed;
@@ -795,29 +795,29 @@ bool validateResetRebind(CanopenTestMaster& master,
                 master, lely::canopen::NmtCommand::START,
                 CANOPEN_SLAVE_NODE_ID, lely::canopen::NmtState::START,
                 std::chrono::milliseconds(CANOPEN_WAIT_TIMEOUT_MS),
-                "B09G final NMT Start")) {
-            spdlog::error("B09G-06 could not restore MCU Operational state");
+                "GFC protocol validation final NMT Start")) {
+            spdlog::error("GFC reset/rebind verification could not restore MCU Operational state");
             return false;
         }
         state.remote_operational_restored = true;
     }
 
-    spdlog::info("B09G-06 Reset Communication callback rebind passed");
+    spdlog::info("GFC reset/rebind verification Reset Communication callback rebind passed");
     return true;
 }
 
 /**
- * @brief Verify normal SDO service after the GFC stage activity.
+ * @brief Verify normal SDO service after GFC protocol activity.
  */
 bool validateProtocolHealth(lely::canopen::AsyncMaster& master)
 {
     std::uint32_t device_type = 0U;
     if (!readRemote(master, 0x1000U, kScalarSubindex,
                     device_type, "0x1000 device type health read")) {
-        spdlog::error("B09G-07 ordinary SDO health check failed");
+        spdlog::error("GFC protocol-health regression ordinary SDO health check failed");
         return false;
     }
-    spdlog::info("B09G-07 ordinary SDO health passed: 0x1000=0x{:08x}",
+    spdlog::info("GFC protocol-health regression ordinary SDO health passed: 0x1000=0x{:08x}",
                  device_type);
     return true;
 }
@@ -853,13 +853,13 @@ bool settlePendingProducer(CanopenTestMaster& master)
     }
 
     spdlog::warn(
-        "B09G cleanup settling pending producer request: request={} complete={}",
+        "GFC protocol validation cleanup settling pending producer request: request={} complete={}",
         request_seq, complete_seq);
 
     std::int32_t producer_result = 0;
     if (!waitForProducerCompletion(master, request_seq, producer_result)) {
         spdlog::error(
-            "B09G cleanup could not settle pending producer request {}",
+            "GFC protocol validation cleanup could not settle pending producer request {}",
             request_seq);
         return false;
     }
@@ -876,7 +876,7 @@ bool settlePendingProducer(CanopenTestMaster& master)
     if (confirmed_request != request_seq
         || confirmed_complete != request_seq) {
         spdlog::error(
-            "B09G cleanup producer sequence did not converge: expected={} request={} complete={}",
+            "GFC protocol validation cleanup producer sequence did not converge: expected={} request={} complete={}",
             request_seq, confirmed_request, confirmed_complete);
         return false;
     }
@@ -885,7 +885,7 @@ bool settlePendingProducer(CanopenTestMaster& master)
 }
 
 /**
- * @brief Restore J03-owned remote configuration/state after success or failure.
+ * @brief Restore remote configuration/state owned by GFC integration validation after success or failure.
  */
 bool cleanupGfcValidation(CanopenTestMaster& master,
                           GfcRuntimeState& state)
@@ -900,8 +900,8 @@ bool cleanupGfcValidation(CanopenTestMaster& master,
                 master, lely::canopen::NmtCommand::START,
                 CANOPEN_SLAVE_NODE_ID, lely::canopen::NmtState::START,
                 std::chrono::milliseconds(CANOPEN_WAIT_TIMEOUT_MS),
-                "B09G cleanup NMT Start")) {
-            spdlog::error("B09G cleanup could not restore MCU Operational state");
+                "GFC protocol validation cleanup NMT Start")) {
+            spdlog::error("GFC protocol validation cleanup could not restore MCU Operational state");
             result = false;
         } else {
             state.remote_operational_restored = true;
@@ -912,9 +912,9 @@ bool cleanupGfcValidation(CanopenTestMaster& master,
         const bool producer_settled = settlePendingProducer(master);
         if (!producer_settled) {
             /* Do not re-enable a producer while a previous request may still
-             * be pending. Leave the stage dirty/failed instead. */
+             * be pending. Leave the process dirty/failed instead. */
             spdlog::error(
-                "B09G cleanup leaves GFC disabled because producer state could not be settled");
+                "GFC protocol validation cleanup leaves GFC disabled because producer state could not be settled");
             result = false;
         } else if (!writeRemote(master, kGfcParameterIndex, kScalarSubindex,
                                 state.original_valid,
@@ -926,7 +926,7 @@ bool cleanupGfcValidation(CanopenTestMaster& master,
                             restored, "verify restored 0x1300")
                 || restored != state.original_valid) {
                 spdlog::error(
-                    "B09G cleanup 0x1300 restore mismatch: expected={} actual={}",
+                    "GFC protocol validation cleanup 0x1300 restore mismatch: expected={} actual={}",
                     static_cast<unsigned int>(state.original_valid),
                     static_cast<unsigned int>(restored));
                 result = false;
@@ -938,7 +938,7 @@ bool cleanupGfcValidation(CanopenTestMaster& master,
 }
 
 /**
- * @brief Execute the complete first-version J03/B09G protocol sequence.
+ * @brief Execute the complete GFC protocol validation sequence.
  */
 bool runGfcValidation(CanopenTestMaster& master,
                       GfcWireFixture& fixture,
@@ -954,7 +954,7 @@ bool runGfcValidation(CanopenTestMaster& master,
         return false;
     }
     if (original_valid > 1U) {
-        spdlog::error("B09G invalid initial 0x1300 value: {}",
+        spdlog::error("GFC protocol validation invalid initial 0x1300 value: {}",
                       static_cast<unsigned int>(original_valid));
         return false;
     }
@@ -964,19 +964,19 @@ bool runGfcValidation(CanopenTestMaster& master,
     GfcDiagnostic diagnostic;
     if (!readDiagnostic(master, diagnostic)) {
         spdlog::error(
-            "B09G MCU diagnostic 0x2302 is unavailable; enable the GFC demo diagnostic firmware option");
+            "GFC protocol validation MCU diagnostic 0x2302 is unavailable; enable the GFC demo diagnostic firmware option");
         return false;
     }
     if (diagnostic.producer_request_seq != diagnostic.producer_complete_seq) {
         spdlog::error(
-            "B09G preflight found pending producer request: request={} complete={}",
+            "GFC protocol validation preflight found pending producer request: request={} complete={}",
             diagnostic.producer_request_seq,
             diagnostic.producer_complete_seq);
         return false;
     }
 
     spdlog::info(
-        "B09G preflight passed: 0x1300={} rx_count={} producer_seq={}",
+        "GFC protocol validation preflight passed: 0x1300={} rx_count={} producer_seq={}",
         static_cast<unsigned int>(original_valid), diagnostic.rx_count,
         diagnostic.producer_complete_seq);
 
@@ -1004,7 +1004,7 @@ int gfcProcess(CanopenTestMaster& master, lely::io::CanChannel& wire_channel)
 
     if (result == 0) {
         spdlog::info(
-            "B09G GFC consumer, producer, invalid-frame, continuous-count, reset-rebind, and SDO-health tests passed");
+            "GFC protocol validation consumer, producer, invalid-frame, continuous-count, reset-rebind, and SDO-health tests passed");
     }
     return result;
 }

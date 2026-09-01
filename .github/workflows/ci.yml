@@ -1,0 +1,111 @@
+name: CI
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+    branches: [master, main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: canopen-slave-tester-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  cppcheck:
+    name: Cppcheck report
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - name: Install Cppcheck
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cppcheck
+
+      - name: Run Cppcheck
+        shell: bash
+        run: |
+          set -o pipefail
+          cppcheck \
+            --enable=warning,style,performance,portability \
+            --inconclusive \
+            --std=c++14 \
+            --language=c++ \
+            --force \
+            --quiet \
+            --suppress=missingInclude \
+            --suppress=missingIncludeSystem \
+            -Iinclude \
+            src include \
+            2> >(tee cppcheck.txt >&2)
+
+      - name: Upload Cppcheck report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: cppcheck-report
+          path: cppcheck.txt
+          if-no-files-found: error
+
+  tq8mp-build:
+    name: Cross-compile TQ8MP with Yocto SDK
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    runs-on: [self-hosted, linux, x64, tq8mp-yocto]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Configure and build with the real TQ8MP SDK
+        shell: bash
+        env:
+          YOCTO_SDK_ROOT: ${{ vars.TQ8MP_YOCTO_SDK_ROOT }}
+          LELY_STAGE_ROOT: ${{ vars.TQ8MP_LELY_STAGE_ROOT }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "$YOCTO_SDK_ROOT" ]; then
+            echo "Repository variable TQ8MP_YOCTO_SDK_ROOT is required." >&2
+            exit 1
+          fi
+          if [ -z "$LELY_STAGE_ROOT" ]; then
+            echo "Repository variable TQ8MP_LELY_STAGE_ROOT is required." >&2
+            exit 1
+          fi
+
+          tool_bin="$YOCTO_SDK_ROOT/sysroots/x86_64-pokysdk-linux/usr/bin/aarch64-poky-linux"
+          sysroot="$YOCTO_SDK_ROOT/sysroots/armv8a-poky-linux"
+          lely_include="$LELY_STAGE_ROOT/include"
+          lely_lib="$LELY_STAGE_ROOT/lib"
+
+          test -x "$tool_bin/aarch64-poky-linux-gcc"
+          test -x "$tool_bin/aarch64-poky-linux-g++"
+          test -d "$sysroot"
+          test -d "$lely_include"
+          test -f "$lely_lib/pkgconfig/liblely-coapp.pc"
+
+          cat > "$RUNNER_TEMP/canopen-build-config.cmake" <<CMAKE
+          set(CANOPEN_TOOLCHAIN_BIN_DIR "$tool_bin" CACHE PATH "Cross-compilation tool directory" FORCE)
+          set(CANOPEN_TOOLCHAIN_PREFIX "aarch64-poky-linux" CACHE STRING "Cross-compilation tool prefix" FORCE)
+          set(CANOPEN_SYSROOT "$sysroot" CACHE PATH "Target sysroot" FORCE)
+          set(CANOPEN_LELY_INCLUDE_DIR "$lely_include" CACHE PATH "Lely include directory" FORCE)
+          set(CANOPEN_LELY_LIBRARY_DIR "$lely_lib" CACHE PATH "Lely library directory" FORCE)
+          CMAKE
+
+          rm -rf build-ci-tq8mp
+          cmake -S . -B build-ci-tq8mp \
+            -DCANOPEN_LOCAL_BUILD_CONFIG="$RUNNER_TEMP/canopen-build-config.cmake" \
+            -DCMAKE_BUILD_TYPE=MinSizeRel
+          cmake --build build-ci-tq8mp --parallel
+
+          "$tool_bin/aarch64-poky-linux-readelf" \
+            -h build-ci-tq8mp/canopen_master | tee "$RUNNER_TEMP/elf-header.txt"
+          grep -Eq 'Machine:[[:space:]]+AArch64' "$RUNNER_TEMP/elf-header.txt"

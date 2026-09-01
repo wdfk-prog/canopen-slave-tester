@@ -26,7 +26,7 @@ int canopenRunProcesses(const CanopenProcessEntry* processes,
         return 1;
     }
 
-    /* i selects the next process in the declared A01 -> Axx execution order. */
+    /* i selects the next process in the declared validation order. */
     for (std::size_t i = 0; i < process_count; ++i) {
         /* Keep a reference instead of copying the callable/name pair. */
         const CanopenProcessEntry& process = processes[i];

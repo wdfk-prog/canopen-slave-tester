@@ -6,7 +6,7 @@
 #ifndef NMT_HEARTBEAT_H
 #define NMT_HEARTBEAT_H
 
-/** Enable the A01 bidirectional Heartbeat verification process. */
+/** Enable bidirectional Heartbeat producer/consumer validation. */
 #define CANOPEN_ENABLE_HEARTBEAT_PROCESS 0
 
 #include <chrono>
@@ -19,10 +19,10 @@ enum class NmtState;
 } // namespace lely
 
 /**
- * @brief Register Boot and Heartbeat callbacks used by A01.
+ * @brief Register Boot and Heartbeat callbacks used by Heartbeat validation.
  *
  * EMCY observation is registered separately through the shared observer so
- * A01 and A06 do not compete for Lely's single OnEmcy() callback slot.
+ * Heartbeat validation and EMCY producer validation do not compete for Lely's single OnEmcy() callback slot.
  *
  * @param master Lely asynchronous master that owns the callback hooks.
  */

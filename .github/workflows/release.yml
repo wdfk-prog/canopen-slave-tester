@@ -1,0 +1,203 @@
+name: TQ8MP Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Release tag, for example: v0.5.0'
+        required: true
+        type: string
+      prerelease:
+        description: 'Publish as prerelease'
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: canopen-slave-tester-release-${{ github.ref_type == 'tag' && github.ref_name || inputs.release_tag || github.sha }}
+  cancel-in-progress: false
+
+env:
+  RELEASE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || inputs.release_tag }}
+
+jobs:
+  build-tq8mp:
+    name: Build TQ8MP release with Yocto SDK
+    runs-on: [self-hosted, linux, x64, tq8mp-yocto]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Validate release tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! "$RELEASE_TAG" =~ ^v[0-9A-Za-z][0-9A-Za-z._-]*$ ]]; then
+            echo "Release tag must match v[0-9A-Za-z][0-9A-Za-z._-]*." >&2
+            exit 1
+          fi
+
+          if git show-ref --verify --quiet "refs/tags/$RELEASE_TAG"; then
+            tag_commit="$(git rev-parse "$RELEASE_TAG^{commit}")"
+            head_commit="$(git rev-parse HEAD)"
+            if [ "$tag_commit" != "$head_commit" ]; then
+              echo "Existing tag $RELEASE_TAG does not point to the checked-out commit." >&2
+              exit 1
+            fi
+          fi
+
+      - name: Validate TQ8MP build environment
+        shell: bash
+        env:
+          YOCTO_SDK_ROOT: ${{ vars.TQ8MP_YOCTO_SDK_ROOT }}
+          LELY_STAGE_ROOT: ${{ vars.TQ8MP_LELY_STAGE_ROOT }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "$YOCTO_SDK_ROOT" ]; then
+            echo "Repository variable TQ8MP_YOCTO_SDK_ROOT is required." >&2
+            exit 1
+          fi
+          if [ -z "$LELY_STAGE_ROOT" ]; then
+            echo "Repository variable TQ8MP_LELY_STAGE_ROOT is required." >&2
+            exit 1
+          fi
+
+          tool_bin="$YOCTO_SDK_ROOT/sysroots/x86_64-pokysdk-linux/usr/bin/aarch64-poky-linux"
+          sysroot="$YOCTO_SDK_ROOT/sysroots/armv8a-poky-linux"
+          lely_include="$LELY_STAGE_ROOT/include"
+          lely_lib="$LELY_STAGE_ROOT/lib"
+
+          test -x "$tool_bin/aarch64-poky-linux-gcc"
+          test -x "$tool_bin/aarch64-poky-linux-g++"
+          test -d "$sysroot"
+          test -d "$lely_include"
+          test -f "$lely_lib/pkgconfig/liblely-coapp.pc"
+
+          cat > "$RUNNER_TEMP/canopen-build-config.cmake" <<CMAKE
+          set(CANOPEN_TOOLCHAIN_BIN_DIR "$tool_bin" CACHE PATH "Cross-compilation tool directory" FORCE)
+          set(CANOPEN_TOOLCHAIN_PREFIX "aarch64-poky-linux" CACHE STRING "Cross-compilation tool prefix" FORCE)
+          set(CANOPEN_SYSROOT "$sysroot" CACHE PATH "Target sysroot" FORCE)
+          set(CANOPEN_LELY_INCLUDE_DIR "$lely_include" CACHE PATH "Lely include directory" FORCE)
+          set(CANOPEN_LELY_LIBRARY_DIR "$lely_lib" CACHE PATH "Lely library directory" FORCE)
+          CMAKE
+
+          echo "CANOPEN_CI_TOOL_BIN=$tool_bin" >> "$GITHUB_ENV"
+          echo "CANOPEN_CI_SYSROOT=$sysroot" >> "$GITHUB_ENV"
+          echo "CANOPEN_CI_LELY_INCLUDE=$lely_include" >> "$GITHUB_ENV"
+          echo "CANOPEN_CI_LELY_LIB=$lely_lib" >> "$GITHUB_ENV"
+
+      - name: Cross-compile TQ8MP release
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf build-release-tq8mp
+          cmake -S . -B build-release-tq8mp \
+            -DCANOPEN_LOCAL_BUILD_CONFIG="$RUNNER_TEMP/canopen-build-config.cmake" \
+            -DCMAKE_BUILD_TYPE=MinSizeRel
+          cmake --build build-release-tq8mp --parallel
+
+          "$CANOPEN_CI_TOOL_BIN/aarch64-poky-linux-readelf" \
+            -h build-release-tq8mp/canopen_master | tee "$RUNNER_TEMP/elf-header.txt"
+          grep -Eq 'Machine:[[:space:]]+AArch64' "$RUNNER_TEMP/elf-header.txt"
+
+      - name: Package TQ8MP release asset
+        shell: bash
+        run: |
+          set -euo pipefail
+          asset_name="canopen-slave-tester-${RELEASE_TAG}-tq8mp-aarch64"
+          stage_root="$RUNNER_TEMP/$asset_name"
+          dist_dir="$GITHUB_WORKSPACE/dist"
+          archive="$dist_dir/$asset_name.tar.gz"
+
+          rm -rf "$stage_root" "$dist_dir"
+          mkdir -p "$stage_root" "$dist_dir"
+
+          cmake --install build-release-tq8mp --prefix "$stage_root"
+          mkdir -p "$stage_root/lib"
+          cp -a "$CANOPEN_CI_LELY_LIB"/liblely-*.so* "$stage_root/lib/"
+
+          lely_version="$(sed -n 's/^Version:[[:space:]]*//p' "$CANOPEN_CI_LELY_LIB/pkgconfig/liblely-coapp.pc" | head -n 1)"
+          compiler_version="$("$CANOPEN_CI_TOOL_BIN/aarch64-poky-linux-g++" --version | head -n 1)"
+          cat > "$stage_root/BUILD_INFO.txt" <<INFO
+          Project: canopen-slave-tester
+          Release: ${RELEASE_TAG}
+          Commit: ${GITHUB_SHA}
+          Target: TQ8MP / Linux aarch64
+          Compiler: ${compiler_version}
+          Sysroot: ${CANOPEN_CI_SYSROOT}
+          Lely: ${lely_version}
+          Build type: MinSizeRel
+          INFO
+
+          tar -C "$RUNNER_TEMP" -czf "$archive" "$asset_name"
+          (cd "$dist_dir" && sha256sum "$asset_name.tar.gz" > "$asset_name.tar.gz.sha256")
+
+      - name: Upload packaged TQ8MP artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: tq8mp-release
+          path: |
+            dist/canopen-slave-tester-${{ env.RELEASE_TAG }}-tq8mp-aarch64.tar.gz
+            dist/canopen-slave-tester-${{ env.RELEASE_TAG }}-tq8mp-aarch64.tar.gz.sha256
+          if-no-files-found: error
+          retention-days: 14
+
+  publish-release:
+    name: Publish GitHub Release
+    runs-on: ubuntu-22.04
+    needs: build-tq8mp
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download packaged TQ8MP artifact
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        with:
+          name: tq8mp-release
+          path: release-assets
+
+      - name: Create or update GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PRERELEASE: ${{ github.event_name == 'workflow_dispatch' && inputs.prerelease || false }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          prerelease_flag=()
+          if [ "$PRERELEASE" = "true" ]; then
+            prerelease_flag=(--prerelease)
+          fi
+
+          if gh release view "$RELEASE_TAG" -R "$REPO" >/dev/null 2>&1; then
+            echo "Release $RELEASE_TAG already exists; assets will be replaced."
+          else
+            gh release create "$RELEASE_TAG" \
+              -R "$REPO" \
+              --title "CANopen Slave Tester $RELEASE_TAG" \
+              --target "$GITHUB_SHA" \
+              --generate-notes \
+              "${prerelease_flag[@]}"
+          fi
+
+          shopt -s nullglob
+          assets=(release-assets/*)
+          if [ ${#assets[@]} -eq 0 ]; then
+            echo "No release assets found." >&2
+            exit 1
+          fi
+
+          gh release upload "$RELEASE_TAG" -R "$REPO" "${assets[@]}" --clobber

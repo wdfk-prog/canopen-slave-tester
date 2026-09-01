@@ -36,7 +36,7 @@ public:
      *
      * A failed Lely push can occur either before the local EMCY stack changes
      * or after the error has been added but before the EMCY frame is queued.
-     * The latter case still belongs to B06 cleanup, so stack_updated is derived
+     * The latter case still belongs to EMCY consumer validation cleanup, so stack_updated is derived
      * while holding the master lock. When the stack was already non-empty,
      * OD 0x1003 is synchronized by Lely and distinguishes duplicate pushes.
      *
@@ -137,7 +137,7 @@ public:
      * @brief Abort the active/queued Client-SDO requests for one remote node.
      *
      * This exposes the protected Lely Client-SDO queue operation required by
-     * B02-08. The caller must ensure no unrelated SDO request for the same node
+     * SDO block client-abort recovery. The caller must ensure no unrelated SDO request for the same node
      * is active because Lely applies the abort code to the complete per-node
      * queue. CancelAll() does not count the stopped ongoing request in its return
      * value, so the request completion callback is the authoritative abort result.

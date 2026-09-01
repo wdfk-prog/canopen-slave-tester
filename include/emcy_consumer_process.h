@@ -1,12 +1,12 @@
 /**
  * @file
- * @brief B06 EMCY consumer validation interface.
+ * @brief EMCY consumer validation interface.
  */
 
 #ifndef EMCY_CONSUMER_PROCESS_H
 #define EMCY_CONSUMER_PROCESS_H
 
-/** Enable the B06 MCU EMCY consumer validation process. */
+/** Enable MCU EMCY consumer validation. */
 #define CANOPEN_ENABLE_EMCY_CONSUMER_PROCESS 0
 
 class CanopenTestMaster;
@@ -19,7 +19,7 @@ class CanopenTestMaster;
  * process checks message fields, duplicate delivery, recovery EMCY, ordinary
  * SDO health, and callback re-registration after Reset Communication.
  *
- * @param master B06 test master with access to Lely local EMCY recovery.
+ * @param master EMCY consumer validation test master with access to Lely local EMCY recovery.
  * @return Zero on success; otherwise a non-zero process result.
  */
 int emcyConsumerProcess(CanopenTestMaster& master);

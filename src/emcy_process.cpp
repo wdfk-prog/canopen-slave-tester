@@ -1,6 +1,6 @@
 /**
  * @file
- * @brief Implements A06 EMCY producer validation.
+ * @brief Implements EMCY producer validation.
  */
 
 #include "emcy_process.h"
@@ -34,7 +34,7 @@ constexpr std::uint16_t kEmcyInhibitIndex = 0x1015;
 constexpr std::uint16_t kHeartbeatIndex = 0x1017;
 /** Master-local Emergency consumer object. */
 constexpr std::uint16_t kEmcyConsumerIndex = 0x1028;
-/** All scalar objects used by A06 are at sub-index zero. */
+/** All scalar objects used by EMCY producer validation are at sub-index zero. */
 constexpr std::uint8_t kScalarSubindex = 0x00;
 /** Lely maps 0x1028 sub-index N to remote EMCY producer node-ID N. */
 constexpr std::uint8_t kEmcyConsumerSubindex = CANOPEN_SLAVE_NODE_ID;
@@ -43,7 +43,7 @@ constexpr std::uint8_t kEmcyConsumerSubindex = CANOPEN_SLAVE_NODE_ID;
 constexpr std::uint32_t kCobIdInvalidMask = 0x80000000U;
 /** Standard 11-bit CAN-ID field used by the current test topology. */
 constexpr std::uint32_t kStandardCanIdMask = 0x000007FFU;
-/** A06 temporary standard EMCY CAN-ID; 0x681 is free in the current topology. */
+/** EMCY producer validation temporary standard EMCY CAN-ID; 0x681 is free in the current topology. */
 constexpr std::uint32_t kTestEmcyCobId = 0x00000681U;
 
 /** Heartbeat consumer timeout EMCY produced by CANopenNode. */
@@ -72,9 +72,9 @@ constexpr std::uint32_t kInhibitUpperMarginMs = 1000U;
 /** Cleanup polls 0x1001 while an EMCY callback path may be unavailable. */
 constexpr std::uint32_t kCleanupPollIntervalMs = 100U;
 
-/** Values that must be restored after any A06 exit path. */
+/** Values that must be restored after any EMCY producer validation exit path. */
 struct EmcySavedState {
-    /** Original local Producer Heartbeat period; non-zero is required by A06. */
+    /** Original local Producer Heartbeat period; non-zero is required by EMCY producer validation. */
     std::uint16_t master_heartbeat = 0;
     /** Original master-local 0x1028 entry for the slave. */
     std::uint32_t master_consumer_cob_id = 0;
@@ -84,7 +84,7 @@ struct EmcySavedState {
     std::uint16_t slave_inhibit_time = 0;
 };
 
-/** Snapshot of the diagnostic fields A06 reads from 0x1001/0x1003. */
+/** Snapshot of the diagnostic fields EMCY producer validation reads from 0x1001/0x1003. */
 struct ErrorHistorySnapshot {
     /** Current 0x1001 Error Register. */
     std::uint8_t error_register = 0;
@@ -143,7 +143,7 @@ bool readRemoteObject(lely::canopen::AsyncMaster& master, std::uint16_t index,
     if (readRemoteSdo<T>(master, CANOPEN_SLAVE_NODE_ID, index, subindex,
                          value)
         != SdoOperationResult::SUCCESS) {
-        spdlog::error("A06 remote read failed: {}", label);
+        spdlog::error("EMCY producer validation remote read failed: {}", label);
         return false;
     }
     return true;
@@ -160,7 +160,7 @@ bool writeRemoteObject(lely::canopen::AsyncMaster& master,
     if (writeRemoteSdo<T>(master, CANOPEN_SLAVE_NODE_ID, index, subindex,
                           value)
         != SdoOperationResult::SUCCESS) {
-        spdlog::error("A06 remote write failed: {}", label);
+        spdlog::error("EMCY producer validation remote write failed: {}", label);
         return false;
     }
     return true;
@@ -342,7 +342,7 @@ bool writeMasterHeartbeat(lely::canopen::AsyncMaster& master,
                           heartbeat_ms, "Producer Heartbeat")) {
         return false;
     }
-    spdlog::info("A06 master Producer Heartbeat set to {} ms",
+    spdlog::info("EMCY producer validation master Producer Heartbeat set to {} ms",
                  static_cast<unsigned int>(heartbeat_ms));
     return true;
 }
@@ -360,7 +360,7 @@ bool triggerHeartbeatFault(lely::canopen::AsyncMaster& master,
     if (!waitForCanopenEmcyEvent(
             sequence, CANOPEN_SLAVE_NODE_ID, kHeartbeatConsumerEmcyCode,
             std::chrono::milliseconds(kEmcyWaitTimeoutMs), event)) {
-        spdlog::error("A06 heartbeat-consumer EMCY 0x8130 timed out");
+        spdlog::error("EMCY producer validation heartbeat-consumer EMCY 0x8130 timed out");
         return false;
     }
     return true;
@@ -381,7 +381,7 @@ bool recoverHeartbeatFault(lely::canopen::AsyncMaster& master,
     if (!waitForCanopenEmcyEvent(
             sequence, CANOPEN_SLAVE_NODE_ID, kEmcyResetCode, timeout,
             event)) {
-        spdlog::error("A06 heartbeat-consumer EMCY reset timed out");
+        spdlog::error("EMCY producer validation heartbeat-consumer EMCY reset timed out");
         return false;
     }
     return true;
@@ -494,7 +494,7 @@ bool writeRemoteEmcyCobId(lely::canopen::AsyncMaster& master,
 }
 
 /**
- * @brief Capture every communication value modified by A06.
+ * @brief Capture every communication value modified by EMCY producer validation.
  */
 bool captureSavedState(lely::canopen::AsyncMaster& master,
                        EmcySavedState& state)
@@ -521,13 +521,13 @@ bool captureSavedState(lely::canopen::AsyncMaster& master,
     }
 
     if (state.master_heartbeat == 0U) {
-        spdlog::error("A06 requires a non-zero master Producer Heartbeat");
+        spdlog::error("EMCY producer validation requires a non-zero master Producer Heartbeat");
         return false;
     }
     if (!cobIdEnabled(state.master_consumer_cob_id)
         || !cobIdEnabled(state.slave_emcy_cob_id)) {
         spdlog::error(
-            "A06 requires enabled standard EMCY paths: master=0x{:08x} "
+            "EMCY producer validation requires enabled standard EMCY paths: master=0x{:08x} "
             "slave=0x{:08x}",
             state.master_consumer_cob_id, state.slave_emcy_cob_id);
         return false;
@@ -542,13 +542,13 @@ bool captureSavedState(lely::canopen::AsyncMaster& master,
     }
     if (standardCanId(state.slave_emcy_cob_id)
         == standardCanId(kTestEmcyCobId)) {
-        spdlog::error("A06 test EMCY CAN-ID 0x{:03x} equals the baseline",
+        spdlog::error("EMCY producer validation test EMCY CAN-ID 0x{:03x} equals the baseline",
                       standardCanId(kTestEmcyCobId));
         return false;
     }
 
     spdlog::info(
-        "A06 baseline: heartbeat={}ms slave_1014=0x{:08x} "
+        "EMCY producer validation baseline: heartbeat={}ms slave_1014=0x{:08x} "
         "master_1028=0x{:08x} inhibit={} (100us)",
         static_cast<unsigned int>(state.master_heartbeat),
         state.slave_emcy_cob_id, state.master_consumer_cob_id,
@@ -609,7 +609,7 @@ bool runDefaultEmcyValidation(lely::canopen::AsyncMaster& master,
     }
     if (baseline.error_register != 0U) {
         spdlog::error(
-            "A06 precondition failed: Error Register already active: 0x{:02x}",
+            "EMCY producer validation precondition failed: Error Register already active: 0x{:02x}",
             static_cast<unsigned int>(baseline.error_register));
         return false;
     }
@@ -629,7 +629,7 @@ bool runDefaultEmcyValidation(lely::canopen::AsyncMaster& master,
     }
     if (inhibit_readback != 0U) {
         spdlog::error(
-            "A06 basic inhibit readback mismatch: expected=0 actual={}",
+            "EMCY producer validation basic inhibit readback mismatch: expected=0 actual={}",
             static_cast<unsigned int>(inhibit_readback));
         return false;
     }
@@ -643,9 +643,9 @@ bool runDefaultEmcyValidation(lely::canopen::AsyncMaster& master,
 
     bool result = true;
     if (!validateHeartbeatEmcyData(fault, kHeartbeatConsumerEmcyCode,
-                                   "A06 default fault")
+                                   "EMCY producer validation default fault")
         || !validateErrorRegister(master, fault, true,
-                                  "A06 default fault")) {
+                                  "EMCY producer validation default fault")) {
         result = false;
     }
 
@@ -657,7 +657,7 @@ bool runDefaultEmcyValidation(lely::canopen::AsyncMaster& master,
             expectedHistoryCount(baseline.count, 1U);
         if (fault_history.count != expected_count) {
             spdlog::error(
-                "A06 default fault history count mismatch: expected={} "
+                "EMCY producer validation default fault history count mismatch: expected={} "
                 "actual={}",
                 static_cast<unsigned int>(expected_count),
                 static_cast<unsigned int>(fault_history.count));
@@ -665,7 +665,7 @@ bool runDefaultEmcyValidation(lely::canopen::AsyncMaster& master,
         } else if (fault_history.count == 0U
                    || !validateHistoryEntry(
                        fault_history.newest, kHeartbeatConsumerEmcyCode,
-                       fault.error_register, "A06 default fault")) {
+                       fault.error_register, "EMCY producer validation default fault")) {
             result = false;
         }
     }
@@ -693,17 +693,17 @@ bool runDefaultEmcyValidation(lely::canopen::AsyncMaster& master,
         return false;
     }
     if (!validateHeartbeatEmcyData(reset, kEmcyResetCode,
-                                   "A06 default recovery")
+                                   "EMCY producer validation default recovery")
         || !validateErrorRegister(master, reset, false,
-                                  "A06 default recovery")
+                                  "EMCY producer validation default recovery")
         || !validateHistoryAfterPair(master, baseline.count, fault, reset,
-                                     "A06 default recovery")) {
+                                     "EMCY producer validation default recovery")) {
         result = false;
     }
 
     if (result) {
         spdlog::info(
-            "A06 default EMCY, 0x1001, 0x1003, duplicate suppression, and "
+            "EMCY producer validation default EMCY, 0x1001, 0x1003, duplicate suppression, and "
             "recovery passed");
     }
     return result;
@@ -736,12 +736,12 @@ bool configureTestEmcyCobId(lely::canopen::AsyncMaster& master)
     }
     if (master_cob_id != kTestEmcyCobId || slave_cob_id != kTestEmcyCobId) {
         spdlog::error(
-            "A06 test EMCY path mismatch: master=0x{:08x} slave=0x{:08x}",
+            "EMCY producer validation test EMCY path mismatch: master=0x{:08x} slave=0x{:08x}",
             master_cob_id, slave_cob_id);
         return false;
     }
 
-    spdlog::info("A06 EMCY path switched to CAN-ID 0x{:03x}",
+    spdlog::info("EMCY producer validation path switched to CAN-ID 0x{:03x}",
                  standardCanId(kTestEmcyCobId));
     return true;
 }
@@ -764,7 +764,7 @@ bool runConfigurableInhibitValidation(lely::canopen::AsyncMaster& master,
     }
     if (inhibit_readback != kTestInhibitTime100us) {
         spdlog::error(
-            "A06 inhibit readback mismatch: expected={} actual={}",
+            "EMCY producer validation inhibit readback mismatch: expected={} actual={}",
             static_cast<unsigned int>(kTestInhibitTime100us),
             static_cast<unsigned int>(inhibit_readback));
         return false;
@@ -773,7 +773,7 @@ bool runConfigurableInhibitValidation(lely::canopen::AsyncMaster& master,
     ErrorHistorySnapshot baseline;
     if (!readErrorHistory(master, baseline) || baseline.error_register != 0U) {
         spdlog::error(
-            "A06 configurable/inhibit phase requires a clear Error Register");
+            "EMCY producer validation configurable/inhibit phase requires a clear Error Register");
         return false;
     }
 
@@ -786,9 +786,9 @@ bool runConfigurableInhibitValidation(lely::canopen::AsyncMaster& master,
 
     bool result = true;
     if (!validateHeartbeatEmcyData(fault, kHeartbeatConsumerEmcyCode,
-                                   "A06 configurable fault")
+                                   "EMCY producer validation configurable fault")
         || !validateErrorRegister(master, fault, true,
-                                  "A06 configurable fault")) {
+                                  "EMCY producer validation configurable fault")) {
         result = false;
     }
 
@@ -802,9 +802,9 @@ bool runConfigurableInhibitValidation(lely::canopen::AsyncMaster& master,
         return false;
     }
     if (!validateHeartbeatEmcyData(reset, kEmcyResetCode,
-                                   "A06 configurable recovery")
+                                   "EMCY producer validation configurable recovery")
         || !validateErrorRegister(master, reset, false,
-                                  "A06 configurable recovery")) {
+                                  "EMCY producer validation configurable recovery")) {
         result = false;
     }
 
@@ -819,17 +819,17 @@ bool runConfigurableInhibitValidation(lely::canopen::AsyncMaster& master,
         inhibit_ms + static_cast<std::int64_t>(kInhibitUpperMarginMs);
     if (interval_ms < minimum_ms || interval_ms > maximum_ms) {
         spdlog::error(
-            "A06 inhibit timing mismatch: interval={}ms expected={}..{}ms",
+            "EMCY producer validation inhibit timing mismatch: interval={}ms expected={}..{}ms",
             interval_ms, minimum_ms, maximum_ms);
         result = false;
     } else {
         spdlog::info(
-            "A06 inhibit timing passed: interval={}ms expected={}..{}ms",
+            "EMCY producer validation inhibit timing passed: interval={}ms expected={}..{}ms",
             interval_ms, minimum_ms, maximum_ms);
     }
 
     if (!validateHistoryAfterPair(master, baseline.count, fault, reset,
-                                  "A06 configurable recovery")) {
+                                  "EMCY producer validation configurable recovery")) {
         result = false;
     }
 
@@ -854,12 +854,12 @@ bool waitForClearErrorRegister(lely::canopen::AsyncMaster& master)
             std::chrono::milliseconds(kCleanupPollIntervalMs));
     } while (std::chrono::steady_clock::now() < deadline);
 
-    spdlog::error("A06 cleanup could not confirm Error Register recovery");
+    spdlog::error("EMCY producer validation cleanup could not confirm Error Register recovery");
     return false;
 }
 
 /**
- * @brief Restore all communication values saved before A06.
+ * @brief Restore all communication values saved before EMCY producer validation.
  */
 bool restoreEmcyConfiguration(lely::canopen::AsyncMaster& master,
                               const EmcySavedState& state)
@@ -913,7 +913,7 @@ bool restoreEmcyConfiguration(lely::canopen::AsyncMaster& master,
                || slave_cob_id != state.slave_emcy_cob_id
                || inhibit != state.slave_inhibit_time) {
         spdlog::error(
-            "A06 restoration mismatch: heartbeat={}/{} master_1028={:08x}/{:08x} "
+            "EMCY producer validation restoration mismatch: heartbeat={}/{} master_1028={:08x}/{:08x} "
             "slave_1014={:08x}/{:08x} inhibit={}/{}",
             static_cast<unsigned int>(heartbeat),
             static_cast<unsigned int>(state.master_heartbeat), master_cob_id,
@@ -924,7 +924,7 @@ bool restoreEmcyConfiguration(lely::canopen::AsyncMaster& master,
     }
 
     if (result) {
-        spdlog::info("A06 communication configuration restored and verified");
+        spdlog::info("EMCY producer validation communication configuration restored and verified");
     }
     return result;
 }
@@ -942,7 +942,7 @@ bool runRestoredPathSmoke(lely::canopen::AsyncMaster& master,
         return false;
     }
     bool result = validateHeartbeatEmcyData(
-        fault, kHeartbeatConsumerEmcyCode, "A06 restored-path fault");
+        fault, kHeartbeatConsumerEmcyCode, "EMCY producer validation restored-path fault");
 
     /* Restoring 0x1015 also restores its timing contract. Allow the reset
      * wait to cover the saved inhibit interval plus one Producer Heartbeat and
@@ -962,9 +962,9 @@ bool runRestoredPathSmoke(lely::canopen::AsyncMaster& master,
         return false;
     }
     if (!validateHeartbeatEmcyData(reset, kEmcyResetCode,
-                                   "A06 restored-path recovery")
+                                   "EMCY producer validation restored-path recovery")
         || !validateErrorRegister(master, reset, false,
-                                  "A06 restored-path recovery")) {
+                                  "EMCY producer validation restored-path recovery")) {
         result = false;
     }
 
@@ -973,7 +973,7 @@ bool runRestoredPathSmoke(lely::canopen::AsyncMaster& master,
                           "Device Type smoke read")) {
         result = false;
     } else {
-        spdlog::info("A06 restored-path SDO smoke read: 0x1000=0x{:08x}",
+        spdlog::info("EMCY producer validation restored-path SDO smoke read: 0x1000=0x{:08x}",
                      device_type);
     }
     return result;
@@ -994,7 +994,7 @@ int emcyProcess(lely::canopen::AsyncMaster& master)
     }
     if (initial.error_register != 0U) {
         spdlog::error(
-            "A06 refuses fault injection while 0x1001 is already non-zero: "
+            "EMCY producer validation refuses fault injection while 0x1001 is already non-zero: "
             "0x{:02x}",
             static_cast<unsigned int>(initial.error_register));
         return 1;
@@ -1030,7 +1030,7 @@ int emcyProcess(lely::canopen::AsyncMaster& master)
 
     if (result == 0) {
         spdlog::info(
-            "A06 EMCY producer, history, configurable COB-ID, inhibit, and "
+            "EMCY producer validation, history, configurable COB-ID, inhibit, and "
             "restoration passed");
     }
     return result;

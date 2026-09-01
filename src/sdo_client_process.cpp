@@ -1,6 +1,6 @@
 /**
  * @file
- * @brief Implements J04/B03 MCU SDO Client validation.
+ * @brief Implements MCU SDO client validation.
  */
 
 #include "sdo_client_process.h"
@@ -39,7 +39,7 @@ constexpr std::uint8_t kSubIndexSub = 0x05U;
 constexpr std::uint8_t kPayloadSizeSub = 0x06U;
 /** U32 probe value or deterministic segmented payload seed. */
 constexpr std::uint8_t kProbeValueSub = 0x07U;
-/** J04/J06 request flags. */
+/** MCU SDO client / SDO block-transfer validation request flags. */
 constexpr std::uint8_t kFlagsSub = 0x08U;
 /** Sequence accepted by the MCU mainline. */
 constexpr std::uint8_t kActiveSeqSub = 0x09U;
@@ -56,7 +56,7 @@ constexpr std::uint8_t kResultValueSub = 0x0EU;
 /** FNV-1a checksum over the transferred payload. */
 constexpr std::uint8_t kChecksumSub = 0x0FU;
 
-/** MCU local U32 object used by B03 local-transfer cases. */
+/** MCU local U32 object used by MCU SDO client validation local-transfer cases. */
 constexpr std::uint16_t kLocalControlIndex = 0x2200U;
 /** Deliberately nonexistent local object used for abort validation. */
 constexpr std::uint16_t kMissingLocalIndex = 0x2FFFU;
@@ -68,9 +68,9 @@ constexpr std::uint8_t kMissingNodeId = 126U;
 constexpr std::uint8_t kUploadCommand = 1U;
 /** Second SDO Client operation command value. */
 constexpr std::uint8_t kDownloadCommand = 2U;
-/** J04/B03 segmented/expedited requests keep all optional flags clear. */
+/** MCU SDO client validation segmented/expedited requests keep all optional flags clear. */
 constexpr std::uint8_t kNoFlags = 0U;
-/** J06/B02-12 requests CANopenNode SDO Client block transfer. */
+/** MCU SDO client block-transfer regression requests CANopenNode SDO Client block transfer. */
 constexpr std::uint8_t kBlockFlag = 0x01U;
 /** U32 payload length. */
 constexpr std::uint32_t kU32Size = 4U;
@@ -78,9 +78,9 @@ constexpr std::uint32_t kU32Size = 4U;
 constexpr std::uint32_t kSegmentedSize = 48U;
 /** Deterministic segmented pattern seed. */
 constexpr std::uint32_t kSegmentedSeed = 0xA1B2C3D4U;
-/** B02-12 block payload size served by the Host fixture. */
+/** MCU SDO client block-transfer regression block payload size served by the Host fixture. */
 constexpr std::uint32_t kBlockRegressionSize = 2048U;
-/** Deterministic B02-12 block payload seed. */
+/** Deterministic MCU SDO client block-transfer regression block payload seed. */
 constexpr std::uint32_t kBlockRegressionSeed = 0xB0212C3DU;
 /** Primary reversible U32 probe. */
 constexpr std::uint32_t kProbeValue = 0x12345678U;
@@ -217,13 +217,13 @@ bool submitRequest(CanopenTestMaster& master, const ClientRequest& request,
         || !writeControl(master, kPayloadSizeSub, request.payload_size)
         || !writeControl(master, kProbeValueSub, request.probe_value)
         || !writeControl(master, kFlagsSub, request.flags)) {
-        spdlog::error("B03 request {} setup failed before commit", sequence);
+        spdlog::error("MCU SDO client validation request {} setup failed before commit", sequence);
         return false;
     }
 
     if (!writeControl(master, kRequestSeqSub, sequence)) {
         spdlog::error(
-            "B03 request {} commit failed; inspect 0x2303 before retrying",
+            "MCU SDO client validation request {} commit failed; inspect 0x2303 before retrying",
             sequence);
         return false;
     }
@@ -256,7 +256,7 @@ bool readStatus(CanopenTestMaster& master, ClientStatus& status)
         }
     }
 
-    spdlog::error("B03 unable to obtain a stable 0x2303 result snapshot");
+    spdlog::error("MCU SDO client validation unable to obtain a stable 0x2303 result snapshot");
     return false;
 }
 
@@ -317,12 +317,12 @@ bool runTransaction(CanopenTestMaster& master, const ClientRequest& request,
     }
     if (!waitSequence(master, kCompleteSeqSub, sequence,
                       kCompletionTimeoutMs)) {
-        spdlog::error("B03 request {} completion timed out", sequence);
+        spdlog::error("MCU SDO client validation request {} completion timed out", sequence);
         return false;
     }
     if (!readStatus(master, status) || status.complete_seq != sequence
         || status.active_seq != sequence) {
-        spdlog::error("B03 request {} returned inconsistent sequence state",
+        spdlog::error("MCU SDO client validation request {} returned inconsistent sequence state",
                       sequence);
         return false;
     }
@@ -371,19 +371,19 @@ bool verifyMissingNodePrecondition(CanopenTestMaster& master)
         std::chrono::milliseconds(kMissingNodeProbeMarginMs));
     if (result == SdoOperationResult::SDO_TIMEOUT) {
         spdlog::info(
-            "B03 timeout preflight confirmed node {} has no SDO response",
+            "MCU SDO client validation timeout preflight confirmed node {} has no SDO response",
             static_cast<unsigned int>(kMissingNodeId));
         return true;
     }
 
     if (result == SdoOperationResult::SUCCESS) {
         spdlog::error(
-            "B03 timeout preflight failed: node {} responded at 0x1000:00; "
+            "MCU SDO client validation timeout preflight failed: node {} responded at 0x1000:00; "
             "choose an unused Node-ID",
             static_cast<unsigned int>(kMissingNodeId));
     } else {
         spdlog::error(
-            "B03 timeout preflight was inconclusive for node {} (result={}); "
+            "MCU SDO client validation timeout preflight was inconclusive for node {} (result={}); "
             "do not run timeout cases",
             static_cast<unsigned int>(kMissingNodeId),
             static_cast<int>(result));
@@ -397,7 +397,7 @@ bool restoreLocalControl(CanopenTestMaster& master, std::uint32_t original)
     if (writeRemoteSdo<std::uint32_t>(
             master, CANOPEN_SLAVE_NODE_ID, kLocalControlIndex, 0U, original)
         != SdoOperationResult::SUCCESS) {
-        spdlog::error("B03 cleanup failed restoring MCU 0x2200:00");
+        spdlog::error("MCU SDO client validation cleanup failed restoring MCU 0x2200:00");
         return false;
     }
     std::uint32_t restored = 0U;
@@ -405,7 +405,7 @@ bool restoreLocalControl(CanopenTestMaster& master, std::uint32_t original)
             master, CANOPEN_SLAVE_NODE_ID, kLocalControlIndex, 0U, restored)
             != SdoOperationResult::SUCCESS
         || restored != original) {
-        spdlog::error("B03 cleanup could not verify MCU 0x2200:00");
+        spdlog::error("MCU SDO client validation cleanup could not verify MCU 0x2200:00");
         return false;
     }
     return true;
@@ -417,7 +417,7 @@ bool restoreFixtureU32(HostSdoServerFixture& fixture, std::uint32_t original)
     std::uint32_t restored = 0U;
     if (!fixture.writeU32(original) || !fixture.readU32(restored)
         || restored != original) {
-        spdlog::error("B03 cleanup could not restore/verify Host 0x2F00:00");
+        spdlog::error("MCU SDO client validation cleanup could not restore/verify Host 0x2F00:00");
         return false;
     }
     return true;
@@ -430,7 +430,7 @@ bool restoreFixtureOctets(HostSdoServerFixture& fixture,
     std::vector<std::uint8_t> restored;
     if (!fixture.writeOctets(original) || !fixture.readOctets(restored)
         || restored != original) {
-        spdlog::error("B03 cleanup could not restore/verify Host 0x2F01:00");
+        spdlog::error("MCU SDO client validation cleanup could not restore/verify Host 0x2F01:00");
         return false;
     }
     return true;
@@ -441,9 +441,9 @@ bool restoreFixtureOctets(HostSdoServerFixture& fixture,
 int sdoClientProcess(CanopenTestMaster& master)
 {
     static_assert(kMissingNodeId != CANOPEN_MASTER_NODE_ID,
-                  "B03 timeout node must not be the Host master");
+                  "MCU SDO client validation timeout node must not be the Host master");
     static_assert(kMissingNodeId != CANOPEN_SLAVE_NODE_ID,
-                  "B03 timeout node must not be the MCU under test");
+                  "MCU SDO client validation timeout node must not be the MCU under test");
 
     if (!verifyMissingNodePrecondition(master)) {
         return 1;
@@ -463,16 +463,16 @@ int sdoClientProcess(CanopenTestMaster& master)
         return 1;
     }
 
-    /* B03-01: local U32 upload through CO_CONFIG_SDO_CLI_LOCAL. */
+    /* MCU SDO client local U32 upload: local U32 upload through CO_CONFIG_SDO_CLI_LOCAL. */
     ClientRequest request{kUploadCommand, CANOPEN_SLAVE_NODE_ID,
                           kLocalControlIndex, 0U, 0U, 0U, kNoFlags};
     if (!runTransaction(master, request, status, sequence)
-        || !expectU32Success("B03-01 local U32 upload", status,
+        || !expectU32Success("MCU SDO client local U32 upload local U32 upload", status,
                              original_local)) {
         return 1;
     }
 
-    /* B03-02: local download, independent Host read-back, and strict restore. */
+    /* MCU SDO client local download/readback: local download, independent Host read-back, and strict restore. */
     const std::uint32_t local_probe = original_local == kProbeValue
         ? kAlternateProbeValue : kProbeValue;
     request = {kDownloadCommand, CANOPEN_SLAVE_NODE_ID, kLocalControlIndex,
@@ -481,7 +481,7 @@ int sdoClientProcess(CanopenTestMaster& master)
         runTransaction(master, request, status, sequence);
     std::uint32_t local_readback = 0U;
     bool local_case_ok = local_transaction_ok
-        && expectU32Success("B03-02 local U32 download", status, local_probe);
+        && expectU32Success("MCU SDO client local download/readback local U32 download", status, local_probe);
     if (local_case_ok) {
         local_case_ok = readRemoteSdo<std::uint32_t>(
                             master, CANOPEN_SLAVE_NODE_ID,
@@ -495,27 +495,27 @@ int sdoClientProcess(CanopenTestMaster& master)
         return 1;
     }
     if (!local_case_ok) {
-        spdlog::error("B03-02 read-back mismatch");
+        spdlog::error("MCU SDO client local download/readback read-back mismatch");
         return 1;
     }
 
-    /* B03-03: local missing-object abort followed by a legal local upload. */
+    /* MCU SDO client local abort recovery: local missing-object abort followed by a legal local upload. */
     request = {kUploadCommand, CANOPEN_SLAVE_NODE_ID, kMissingLocalIndex,
                0U, 0U, 0U, kNoFlags};
     if (!runTransaction(master, request, status, sequence)
-        || !expectFailure("B03-03 local missing-object abort", status,
+        || !expectFailure("MCU SDO client local abort recovery local missing-object abort", status,
                           McuSdoClientResult::ABORT, kAbortNotExist)) {
         return 1;
     }
     request = {kUploadCommand, CANOPEN_SLAVE_NODE_ID, kLocalControlIndex,
                0U, 0U, 0U, kNoFlags};
     if (!runTransaction(master, request, status, sequence)
-        || !expectU32Success("B03-03 abort recovery", status,
+        || !expectU32Success("MCU SDO client local-abort recovery", status,
                              original_local)) {
         return 1;
     }
 
-    /* B03-04: remote expedited upload from the Host Node-127 SSDO fixture. */
+    /* MCU SDO client remote expedited upload: remote expedited upload from the Host Node-127 SSDO fixture. */
     std::uint32_t remote_u32 = 0U;
     if (!fixture.readU32(remote_u32)) {
         return 1;
@@ -524,12 +524,12 @@ int sdoClientProcess(CanopenTestMaster& master)
                HostSdoServerFixture::kU32Index,
                HostSdoServerFixture::kSubindex, 0U, 0U, kNoFlags};
     if (!runTransaction(master, request, status, sequence)
-        || !expectU32Success("B03-04 remote U32 upload", status,
+        || !expectU32Success("MCU SDO client remote expedited upload remote U32 upload", status,
                              remote_u32)) {
         return 1;
     }
 
-    /* B03-05: remote expedited download and direct local fixture read-back. */
+    /* MCU SDO client remote expedited download: remote expedited download and direct local fixture read-back. */
     const std::uint32_t remote_probe = remote_u32 == kProbeValue
         ? kAlternateProbeValue : kProbeValue;
     request = {kDownloadCommand, CANOPEN_MASTER_NODE_ID,
@@ -540,7 +540,7 @@ int sdoClientProcess(CanopenTestMaster& master)
         runTransaction(master, request, status, sequence);
     std::uint32_t remote_readback = 0U;
     const bool remote_case_ok = remote_transaction_ok
-        && expectU32Success("B03-05 remote U32 download", status, remote_probe)
+        && expectU32Success("MCU SDO client remote expedited download remote U32 download", status, remote_probe)
         && fixture.readU32(remote_readback) && remote_readback == remote_probe;
     /* Restore regardless of terminal result because the server may have seen
      * part or all of the download before the client reported failure. */
@@ -548,11 +548,11 @@ int sdoClientProcess(CanopenTestMaster& master)
         return 1;
     }
     if (!remote_case_ok) {
-        spdlog::error("B03-05 fixture read-back mismatch");
+        spdlog::error("MCU SDO client remote expedited download fixture read-back mismatch");
         return 1;
     }
 
-    /* B03-06: remote segmented upload of 48 bytes through the 32-byte FIFO. */
+    /* MCU SDO client remote segmented upload: remote segmented upload of 48 bytes through the 32-byte FIFO. */
     const std::vector<std::uint8_t> segmented =
         makeSegmentedPayload(kSegmentedSeed);
     std::vector<std::uint8_t> original_octets;
@@ -563,7 +563,7 @@ int sdoClientProcess(CanopenTestMaster& master)
         /* co_sub_set_val() may replace a variable-length value before an
          * allocation error is reported, so still attempt baseline restore. */
         if (!restoreFixtureOctets(fixture, original_octets)) {
-            spdlog::error("B03-06 setup cleanup verification failed");
+            spdlog::error("MCU SDO client remote segmented upload setup cleanup verification failed");
         }
         return 1;
     }
@@ -582,12 +582,12 @@ int sdoClientProcess(CanopenTestMaster& master)
         return 1;
     }
     if (!segmented_upload_ok) {
-        spdlog::error("B03-06 remote segmented upload failed");
+        spdlog::error("MCU SDO client remote segmented upload remote segmented upload failed");
         return 1;
     }
-    spdlog::info("B03-06 remote segmented upload passed");
+    spdlog::info("MCU SDO client remote segmented upload remote segmented upload passed");
 
-    /* B03-07: remote segmented download, byte-for-byte verify, then restore. */
+    /* MCU SDO client remote segmented download: remote segmented download, byte-for-byte verify, then restore. */
     if (!fixture.readOctets(original_octets)) {
         return 1;
     }
@@ -609,18 +609,18 @@ int sdoClientProcess(CanopenTestMaster& master)
         return 1;
     }
     if (!segmented_download_ok) {
-        spdlog::error("B03-07 remote segmented download failed");
+        spdlog::error("MCU SDO client remote segmented download remote segmented download failed");
         return 1;
     }
-    spdlog::info("B03-07 remote segmented download passed");
+    spdlog::info("MCU SDO client remote segmented download remote segmented download passed");
 
-    /* B03-08: remote read-only abort followed by a legal remote upload. */
+    /* MCU SDO client read-only abort recovery: remote read-only abort followed by a legal remote upload. */
     request = {kDownloadCommand, CANOPEN_MASTER_NODE_ID,
                HostSdoServerFixture::kReadOnlyIndex,
                HostSdoServerFixture::kSubindex, kU32Size, kProbeValue,
                kNoFlags};
     if (!runTransaction(master, request, status, sequence)
-        || !expectFailure("B03-08 remote read-only abort", status,
+        || !expectFailure("MCU SDO client read-only abort recovery remote read-only abort", status,
                           McuSdoClientResult::ABORT, kAbortReadOnly)) {
         return 1;
     }
@@ -628,47 +628,47 @@ int sdoClientProcess(CanopenTestMaster& master)
                HostSdoServerFixture::kU32Index,
                HostSdoServerFixture::kSubindex, 0U, 0U, kNoFlags};
     if (!runTransaction(master, request, status, sequence)
-        || !expectU32Success("B03-08 abort recovery", status, remote_u32)) {
+        || !expectU32Success("MCU SDO client read-only-abort recovery", status, remote_u32)) {
         return 1;
     }
 
-    /* B03-09: absent server must terminate with the native timeout abort. */
+    /* MCU SDO client missing-node timeout: absent server must terminate with the native timeout abort. */
     request = {kUploadCommand, kMissingNodeId,
                HostSdoServerFixture::kU32Index,
                HostSdoServerFixture::kSubindex, 0U, 0U, kNoFlags};
     if (!runTransaction(master, request, status, sequence)
-        || !expectFailure("B03-09 nonexistent-node timeout", status,
+        || !expectFailure("MCU SDO client missing-node timeout nonexistent-node timeout", status,
                           McuSdoClientResult::TIMEOUT, kAbortTimeout)) {
         return 1;
     }
 
-    /* B03-10: the same client instance must work after the timeout. */
+    /* MCU SDO client timeout recovery: the same client instance must work after the timeout. */
     request = {kUploadCommand, CANOPEN_MASTER_NODE_ID,
                HostSdoServerFixture::kU32Index,
                HostSdoServerFixture::kSubindex, 0U, 0U, kNoFlags};
     if (!runTransaction(master, request, status, sequence)
-        || !expectU32Success("B03-10 timeout recovery", status, remote_u32)) {
+        || !expectU32Success("MCU SDO client timeout recovery", status, remote_u32)) {
         return 1;
     }
 
-    /* B03-11: reset only after active_seq proves the timeout request started. */
+    /* MCU SDO client reset cancellation/recovery: reset only after active_seq proves the timeout request started. */
     request = {kUploadCommand, kMissingNodeId,
                HostSdoServerFixture::kU32Index,
                HostSdoServerFixture::kSubindex, 0U, 0U, kNoFlags};
     if (!nextRequestSequence(master, sequence)
         || !submitRequest(master, request, sequence)
         || !waitActivePending(master, sequence, kActiveTimeoutMs)) {
-        spdlog::error("B03-11 could not establish an active transaction");
+        spdlog::error("MCU SDO client reset cancellation/recovery could not establish an active transaction");
         return 1;
     }
 
     prepareBootWait();
     if (!issueNmtCommand(master, lely::canopen::NmtCommand::RESET_COMM,
                          CANOPEN_SLAVE_NODE_ID,
-                         "B03 Reset Communication cancellation")
+                         "MCU SDO client validation Reset Communication cancellation")
         || !waitForBootCompletion(
             std::chrono::milliseconds(CANOPEN_WAIT_TIMEOUT_MS))) {
-        spdlog::error("B03-11 Reset Communication did not complete");
+        spdlog::error("MCU SDO client reset cancellation/recovery Reset Communication did not complete");
         return 1;
     }
     if (!waitSequence(master, kCompleteSeqSub, sequence,
@@ -678,7 +678,7 @@ int sdoClientProcess(CanopenTestMaster& master)
         || status.result
             != static_cast<std::int32_t>(McuSdoClientResult::RESET_CANCELLED)
         || status.abort_code != 0U) {
-        spdlog::error("B03-11 reset cancellation result mismatch");
+        spdlog::error("MCU SDO client reset cancellation/recovery reset cancellation result mismatch");
         return 1;
     }
 
@@ -686,13 +686,13 @@ int sdoClientProcess(CanopenTestMaster& master)
                HostSdoServerFixture::kU32Index,
                HostSdoServerFixture::kSubindex, 0U, 0U, kNoFlags};
     if (!runTransaction(master, request, status, sequence)
-        || !expectU32Success("B03-11 reset recovery", status, remote_u32)) {
+        || !expectU32Success("MCU SDO client reset-cancellation recovery", status, remote_u32)) {
         return 1;
     }
 
 #if CANOPEN_ENABLE_SDO_CLIENT_BLOCK_REGRESSION
-    /* B02-12: MCU block upload from the Host SSDO fixture. This gate is
-     * intentionally separate from J04 so flags=0 behavior remains unchanged. */
+    /* MCU SDO client block-transfer regression: MCU block upload from the Host SSDO fixture. This gate is
+     * intentionally separate from MCU SDO client integration validation so flags=0 behavior remains unchanged. */
     std::vector<std::uint8_t> block_original;
     const std::vector<std::uint8_t> block_payload =
         makePayload(kBlockRegressionSize, kBlockRegressionSeed);
@@ -701,7 +701,7 @@ int sdoClientProcess(CanopenTestMaster& master)
     }
     if (!fixture.writeOctets(block_payload)) {
         if (!restoreFixtureOctets(fixture, block_original)) {
-            spdlog::error("B02-12 upload setup cleanup verification failed");
+            spdlog::error("MCU SDO client block-transfer regression upload setup cleanup verification failed");
         }
         return 1;
     }
@@ -719,12 +719,12 @@ int sdoClientProcess(CanopenTestMaster& master)
         return 1;
     }
     if (!block_upload_ok) {
-        spdlog::error("B02-12 MCU block upload failed");
+        spdlog::error("MCU SDO client block-transfer regression upload failed");
         return 1;
     }
-    spdlog::info("B02-12 MCU block upload passed");
+    spdlog::info("MCU SDO client block-transfer regression upload passed");
 
-    /* B02-12: MCU block download to the Host SSDO fixture and independent
+    /* MCU SDO client block-transfer regression: MCU block download to the Host SSDO fixture and independent
      * byte-for-byte verification through the local object API. */
     if (!fixture.readOctets(block_original)) {
         return 1;
@@ -747,18 +747,18 @@ int sdoClientProcess(CanopenTestMaster& master)
         return 1;
     }
     if (!block_download_ok) {
-        spdlog::error("B02-12 MCU block download failed");
+        spdlog::error("MCU SDO client block-transfer regression download failed");
         return 1;
     }
-    spdlog::info("B02-12 MCU block download passed");
+    spdlog::info("MCU SDO client block-transfer regression download passed");
 
     /* Re-run one ordinary segmented upload after block mode to prove that the
-     * original J04 path remains usable on the same SDO client instance. */
+     * original MCU SDO client integration validation path remains usable on the same SDO client instance. */
     if (!fixture.readOctets(block_original)
         || !fixture.writeOctets(segmented)) {
         if (!block_original.empty()
             && !restoreFixtureOctets(fixture, block_original)) {
-            spdlog::error("B02-12 segmented-regression setup cleanup failed");
+            spdlog::error("MCU SDO client segmented-regression setup cleanup failed");
         }
         return 1;
     }
@@ -776,12 +776,12 @@ int sdoClientProcess(CanopenTestMaster& master)
         return 1;
     }
     if (!post_block_segmented_ok) {
-        spdlog::error("B02-12 post-block segmented regression failed");
+        spdlog::error("MCU SDO client post-block segmented-transfer regression failed");
         return 1;
     }
-    spdlog::info("B02-12 post-block segmented regression passed");
+    spdlog::info("MCU SDO client post-block segmented-transfer regression passed");
 #endif /* CANOPEN_ENABLE_SDO_CLIENT_BLOCK_REGRESSION */
 
-    spdlog::info("B03 MCU SDO Client validation passed");
+    spdlog::info("MCU SDO client validation passed");
     return 0;
 }

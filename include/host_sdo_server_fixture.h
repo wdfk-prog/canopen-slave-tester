@@ -1,6 +1,6 @@
 /**
  * @file
- * @brief J04/B03 local Server-SDO fixture hosted by CANopen master node 127.
+ * @brief MCU SDO client validation local Server-SDO fixture hosted by CANopen master node 127.
  */
 
 #ifndef HOST_SDO_SERVER_FIXTURE_H
@@ -16,7 +16,7 @@ class CanopenTestMaster;
 /**
  * @brief Own test-only Object Dictionary entries served by the master SSDO.
  *
- * The fixture installs three manufacturer-specific objects only for B03 and
+ * The fixture installs three manufacturer-specific objects only for MCU SDO client validation and
  * removes them before the master is destroyed. Existing objects are never
  * replaced.
  */
@@ -48,7 +48,7 @@ public:
     ~HostSdoServerFixture();
 
     /**
-     * @brief Verify SSDO #1 and install all B03 test objects atomically.
+     * @brief Verify SSDO #1 and install all MCU SDO client validation test objects atomically.
      *
      * @return true when all objects were installed; otherwise false.
      */

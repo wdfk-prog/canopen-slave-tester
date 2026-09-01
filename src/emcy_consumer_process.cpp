@@ -1,6 +1,6 @@
 /**
  * @file
- * @brief Implements B06 EMCY consumer validation.
+ * @brief Implements EMCY consumer validation.
  */
 
 #include "emcy_consumer_process.h"
@@ -53,9 +53,9 @@ constexpr std::uint32_t kCobIdInvalidMask = 0x80000000U;
 /** Expected CiA 301 EMCY CAN-ID for the configured Host master node. */
 constexpr std::uint32_t kExpectedHostEmcyCanId = 0x80U + CANOPEN_MASTER_NODE_ID;
 
-/** B06 SDO transaction timeout; diagnostic reads should fail fast. */
+/** EMCY consumer validation SDO transaction timeout; diagnostic reads should fail fast. */
 constexpr std::uint32_t kSdoTimeoutMs = 500U;
-/** Local completion margin after one B06 SDO timeout. */
+/** Local completion margin after one EMCY consumer validation SDO timeout. */
 constexpr std::uint32_t kSdoCompletionMarginMs = 100U;
 /** Maximum wait for one newly published MCU EMCY diagnostic. */
 constexpr std::uint32_t kEmcyObservationTimeoutMs = 2000U;
@@ -104,7 +104,7 @@ struct EmcyConsumerSnapshot {
     std::uint32_t info_code = 0;
 };
 
-/** Runtime state required for cleanup after an interrupted B06 process. */
+/** Runtime state required for cleanup after an interrupted EMCY consumer validation process. */
 struct EmcyConsumerRuntimeState {
     bool host_error_active = false;
     unsigned int expected_host_error_count = 0U;
@@ -122,7 +122,7 @@ bool readLocalObject(lely::canopen::AsyncMaster& master, std::uint16_t index,
     std::error_code error;
     const T read_value = master.Read<T>(index, subindex, error);
     if (error) {
-        spdlog::error("B06 unable to read local {} (0x{:04x}:{:02x}): {}",
+        spdlog::error("EMCY consumer validation unable to read local {} (0x{:04x}:{:02x}): {}",
                       label, index, static_cast<unsigned int>(subindex),
                       error.message());
         return false;
@@ -132,7 +132,7 @@ bool readLocalObject(lely::canopen::AsyncMaster& master, std::uint16_t index,
 }
 
 /**
- * @brief Read one MCU diagnostic value with the B06 fail-fast SDO budget.
+ * @brief Read one MCU diagnostic value with the EMCY consumer validation fail-fast SDO budget.
  */
 template <class T>
 bool readRemoteDiagnostic(lely::canopen::AsyncMaster& master,
@@ -144,7 +144,7 @@ bool readRemoteDiagnostic(lely::canopen::AsyncMaster& master,
             std::chrono::milliseconds(kSdoTimeoutMs),
             std::chrono::milliseconds(kSdoCompletionMarginMs))
         != SdoOperationResult::SUCCESS) {
-        spdlog::error("B06 remote diagnostic read failed: {}", label);
+        spdlog::error("EMCY consumer validation remote diagnostic read failed: {}", label);
         return false;
     }
     return true;
@@ -165,19 +165,19 @@ bool validateProducerPreflight(CanopenTestMaster& master)
     }
 
     if ((cob_id & kCobIdInvalidMask) != 0U) {
-        spdlog::error("B06 Host EMCY producer is disabled: 0x1014=0x{:08x}",
+        spdlog::error("EMCY consumer validation Host EMCY producer is disabled: 0x1014=0x{:08x}",
                       cob_id);
         return false;
     }
     if (cob_id != kExpectedHostEmcyCanId) {
         spdlog::error(
-            "B06 Host EMCY COB-ID mismatch: expected=0x{:08x} actual=0x{:08x}",
+            "EMCY consumer validation Host EMCY COB-ID mismatch: expected=0x{:08x} actual=0x{:08x}",
             kExpectedHostEmcyCanId, cob_id);
         return false;
     }
     if (inhibit_time != 0U) {
         spdlog::error(
-            "B06 requires Host 0x1015=0 for deterministic EMCY timing: actual={}",
+            "EMCY consumer validation requires Host 0x1015=0 for deterministic EMCY timing: actual={}",
             static_cast<unsigned int>(inhibit_time));
         return false;
     }
@@ -188,19 +188,19 @@ bool validateProducerPreflight(CanopenTestMaster& master)
     std::uint16_t active_error = 0;
     std::uint8_t active_register = 0;
     if (!master.peekLocalEmcy(active_error, active_register)) {
-        spdlog::error("B06 Host Lely EMCY service is unavailable");
+        spdlog::error("EMCY consumer validation Host Lely EMCY service is unavailable");
         return false;
     }
     if (active_error != 0U || active_register != 0U) {
         spdlog::error(
-            "B06 refuses to clear a pre-existing Host EMCY: code=0x{:04x} register=0x{:02x}",
+            "EMCY consumer validation refuses to clear a pre-existing Host EMCY: code=0x{:04x} register=0x{:02x}",
             static_cast<unsigned int>(active_error),
             static_cast<unsigned int>(active_register));
         return false;
     }
 
     spdlog::info(
-        "B06 Host EMCY producer preflight passed: node={} CAN-ID=0x{:03x} inhibit=0 active_stack=empty",
+        "EMCY consumer validation Host EMCY producer preflight passed: node={} CAN-ID=0x{:03x} inhibit=0 active_stack=empty",
         CANOPEN_MASTER_NODE_ID, kExpectedHostEmcyCanId);
     return true;
 }
@@ -255,11 +255,11 @@ bool readStableSnapshot(lely::canopen::AsyncMaster& master,
         }
 
         spdlog::warn(
-            "B06 diagnostic changed during SDO snapshot: before={} after={} attempt={}/{}",
+            "EMCY consumer validation diagnostic changed during SDO snapshot: before={} after={} attempt={}/{}",
             count_before, count_after, attempt + 1U, kSnapshotRetryCount);
     }
 
-    spdlog::error("B06 diagnostic snapshot remained unstable");
+    spdlog::error("EMCY consumer validation diagnostic snapshot remained unstable");
     return false;
 }
 
@@ -287,7 +287,7 @@ bool waitForNextRxCount(lely::canopen::AsyncMaster& master,
         }
         if (current_count != baseline_count) {
             spdlog::error(
-                "B06 unexpected EMCY callback count change: baseline={} expected={} actual={}",
+                "EMCY consumer validation unexpected EMCY callback count change: baseline={} expected={} actual={}",
                 baseline_count, expected_count, current_count);
             return false;
         }
@@ -295,7 +295,7 @@ bool waitForNextRxCount(lely::canopen::AsyncMaster& master,
             std::chrono::milliseconds(kDiagnosticPollIntervalMs));
     } while (std::chrono::steady_clock::now() < deadline);
 
-    spdlog::error("B06 EMCY callback timed out: baseline={} expected={}",
+    spdlog::error("EMCY consumer validation callback timed out: baseline={} expected={}",
                   baseline_count, expected_count);
     return false;
 }
@@ -309,20 +309,20 @@ bool validateVectorSnapshot(const EmcyConsumerSnapshot& snapshot,
 {
     bool result = true;
     if (snapshot.rx_count != expected_count) {
-        spdlog::error("B06 vector {} count mismatch: expected={} actual={}",
+        spdlog::error("EMCY consumer validation vector {} count mismatch: expected={} actual={}",
                       vector.name, expected_count, snapshot.rx_count);
         result = false;
     }
     if (snapshot.source_node_id != CANOPEN_MASTER_NODE_ID) {
         spdlog::error(
-            "B06 vector {} source mismatch: expected={} actual={}",
+            "EMCY consumer validation vector {} source mismatch: expected={} actual={}",
             vector.name, CANOPEN_MASTER_NODE_ID,
             static_cast<unsigned int>(snapshot.source_node_id));
         result = false;
     }
     if (snapshot.cob_id != kExpectedHostEmcyCanId) {
         spdlog::error(
-            "B06 vector {} COB-ID mismatch: expected=0x{:03x} actual=0x{:03x}",
+            "EMCY consumer validation vector {} COB-ID mismatch: expected=0x{:03x} actual=0x{:03x}",
             vector.name, kExpectedHostEmcyCanId,
             static_cast<unsigned int>(snapshot.cob_id));
         result = false;
@@ -332,7 +332,7 @@ bool validateVectorSnapshot(const EmcyConsumerSnapshot& snapshot,
         || snapshot.error_bit != vector.expected_error_bit
         || snapshot.info_code != vector.expected_info_code) {
         spdlog::error(
-            "B06 vector {} payload mismatch: code=0x{:04x} register=0x{:02x} bit=0x{:02x} info=0x{:08x}",
+            "EMCY consumer validation vector {} payload mismatch: code=0x{:04x} register=0x{:02x} bit=0x{:02x} info=0x{:08x}",
             vector.name, static_cast<unsigned int>(snapshot.error_code),
             static_cast<unsigned int>(snapshot.error_register),
             static_cast<unsigned int>(snapshot.error_bit), snapshot.info_code);
@@ -353,7 +353,9 @@ bool validateRecoverySnapshot(const EmcyConsumerSnapshot& snapshot,
         || snapshot.error_code != 0U || snapshot.error_register != 0U
         || snapshot.error_bit != 0U || snapshot.info_code != 0U) {
         spdlog::error(
-            "B06 recovery mismatch: count={} source={} cob=0x{:03x} code=0x{:04x} register=0x{:02x} bit=0x{:02x} info=0x{:08x}",
+            "EMCY consumer validation recovery mismatch: count={} source={} "
+            "cob=0x{:03x} code=0x{:04x} register=0x{:02x} bit=0x{:02x} "
+            "info=0x{:08x}",
             snapshot.rx_count,
             static_cast<unsigned int>(snapshot.source_node_id),
             static_cast<unsigned int>(snapshot.cob_id),
@@ -381,16 +383,20 @@ bool validateResetPreservedSnapshot(const EmcyConsumerSnapshot& before,
         return true;
     }
 
-    spdlog::error("B06-08 MCU diagnostic changed across Reset Communication");
+    spdlog::error("EMCY consumer reset/rebind verification MCU diagnostic changed across Reset Communication");
     spdlog::error(
-        "B06-08 before: count={} source={} cob=0x{:03x} code=0x{:04x} register=0x{:02x} bit=0x{:02x} info=0x{:08x}",
+        "EMCY consumer reset/rebind verification before: count={} source={} "
+        "cob=0x{:03x} code=0x{:04x} register=0x{:02x} bit=0x{:02x} "
+        "info=0x{:08x}",
         before.rx_count, static_cast<unsigned int>(before.source_node_id),
         static_cast<unsigned int>(before.cob_id),
         static_cast<unsigned int>(before.error_code),
         static_cast<unsigned int>(before.error_register),
         static_cast<unsigned int>(before.error_bit), before.info_code);
     spdlog::error(
-        "B06-08 after: count={} source={} cob=0x{:03x} code=0x{:04x} register=0x{:02x} bit=0x{:02x} info=0x{:08x}",
+        "EMCY consumer reset/rebind verification after: count={} source={} "
+        "cob=0x{:03x} code=0x{:04x} register=0x{:02x} bit=0x{:02x} "
+        "info=0x{:08x}",
         after.rx_count, static_cast<unsigned int>(after.source_node_id),
         static_cast<unsigned int>(after.cob_id),
         static_cast<unsigned int>(after.error_code),
@@ -420,13 +426,13 @@ bool emitTestEmcy(CanopenTestMaster& master,
 
     if (push_result == -1) {
         spdlog::error(
-            "B06 failed to push vector {} into the Host EMCY producer; local_stack_updated={}",
+            "EMCY consumer validation failed to push vector {} into the Host EMCY producer; local_stack_updated={}",
             vector.name, stack_updated);
         return false;
     }
 
     spdlog::info(
-        "B06 emitted vector {}: code=0x{:04x} register=0x{:02x} bit=0x{:02x} info=0x{:08x}",
+        "EMCY consumer validation emitted vector {}: code=0x{:04x} register=0x{:02x} bit=0x{:02x} info=0x{:08x}",
         vector.name, static_cast<unsigned int>(vector.error_code),
         static_cast<unsigned int>(vector.error_register),
         static_cast<unsigned int>(vector.expected_error_bit),
@@ -448,7 +454,7 @@ bool clearLocalEmcy(CanopenTestMaster& master,
     if (static_cast<unsigned int>(history_count)
         != state.expected_host_error_count) {
         spdlog::error(
-            "B06 refuses to clear Host EMCY stack with unexpected depth: expected={} actual={}",
+            "EMCY consumer validation refuses to clear Host EMCY stack with unexpected depth: expected={} actual={}",
             state.expected_host_error_count,
             static_cast<unsigned int>(history_count));
         return false;
@@ -457,7 +463,7 @@ bool clearLocalEmcy(CanopenTestMaster& master,
     std::uint16_t active_error = 0;
     std::uint8_t active_register = 0;
     if (!master.peekLocalEmcy(active_error, active_register)) {
-        spdlog::error("B06 Host Lely EMCY service is unavailable during cleanup");
+        spdlog::error("EMCY consumer validation Host Lely EMCY service is unavailable during cleanup");
         return false;
     }
     if (active_error == 0U && active_register == 0U) {
@@ -468,7 +474,7 @@ bool clearLocalEmcy(CanopenTestMaster& master,
     if ((active_error != kErrorCodeA && active_error != kErrorCodeB)
         || active_register != kErrorRegister) {
         spdlog::error(
-            "B06 refuses to clear an unexpected Host EMCY: code=0x{:04x} register=0x{:02x}",
+            "EMCY consumer validation refuses to clear an unexpected Host EMCY: code=0x{:04x} register=0x{:02x}",
             static_cast<unsigned int>(active_error),
             static_cast<unsigned int>(active_register));
         return false;
@@ -481,7 +487,7 @@ bool clearLocalEmcy(CanopenTestMaster& master,
     state.expected_host_error_count = 0U;
     if (clear_result == -1) {
         spdlog::error(
-            "B06 Host EMCY stack was cleared but the recovery transmission failed");
+            "EMCY consumer validation Host EMCY stack was cleared but the recovery transmission failed");
         return false;
     }
     return true;
@@ -566,10 +572,12 @@ bool validateSdoHealth(lely::canopen::AsyncMaster& master)
             device_type, std::chrono::milliseconds(kSdoTimeoutMs),
             std::chrono::milliseconds(kSdoCompletionMarginMs))
         != SdoOperationResult::SUCCESS) {
-        spdlog::error("B06-07 ordinary SDO health read failed");
+        spdlog::error("EMCY consumer SDO health check failed");
         return false;
     }
-    spdlog::info("B06-07 SDO health passed: 0x1000=0x{:08x}", device_type);
+    spdlog::info(
+        "EMCY consumer SDO health check passed: 0x1000=0x{:08x}",
+        device_type);
     return true;
 }
 
@@ -581,11 +589,11 @@ bool validateResetRebind(CanopenTestMaster& master,
                          EmcyConsumerSnapshot& current)
 {
     if (state.host_error_active) {
-        spdlog::error("B06-08 expected a clean Host EMCY stack before the reset marker");
+        spdlog::error("EMCY consumer reset/rebind verification expected a clean Host EMCY stack before the reset marker");
         return false;
     }
     if (!emitAndValidateVector(master, state, current, kVectorA,
-                               "B06-08 pre-reset persistence marker")) {
+                               "EMCY consumer reset/rebind verification pre-reset persistence marker")) {
         return false;
     }
 
@@ -593,7 +601,7 @@ bool validateResetRebind(CanopenTestMaster& master,
     prepareBootWait();
     if (!issueNmtCommand(master, lely::canopen::NmtCommand::RESET_COMM,
                          CANOPEN_SLAVE_NODE_ID,
-                         "B06 Reset Communication")) {
+                         "EMCY consumer validation Reset Communication")) {
         return false;
     }
     state.reset_communication_issued = true;
@@ -602,19 +610,19 @@ bool validateResetRebind(CanopenTestMaster& master,
     lely::canopen::NmtState boot_state = lely::canopen::NmtState::BOOTUP;
     if (!waitForBootCompletion(
             std::chrono::milliseconds(CANOPEN_WAIT_TIMEOUT_MS), boot_state)) {
-        spdlog::error("B06-08 MCU Boot after Reset Communication timed out");
+        spdlog::error("EMCY consumer reset/rebind verification MCU Boot after Reset Communication timed out");
         return false;
     }
     state.remote_operational_restored =
         boot_state == lely::canopen::NmtState::START;
     if (state.remote_operational_restored) {
         spdlog::info(
-            "B06-08 Boot already confirmed MCU Operational; final NMT Start is not required");
+            "EMCY consumer reset/rebind verification Boot already confirmed MCU Operational; final NMT Start is not required");
     }
 
     EmcyConsumerSnapshot post_reset;
     if (!readStableSnapshot(master, post_reset)) {
-        spdlog::error("B06-08 post-reset diagnostic snapshot is unavailable");
+        spdlog::error("EMCY consumer reset/rebind verification post-reset diagnostic snapshot is unavailable");
         return false;
     }
     if (!validateResetPreservedSnapshot(pre_reset, post_reset)) {
@@ -622,13 +630,13 @@ bool validateResetRebind(CanopenTestMaster& master,
     }
     current = post_reset;
     spdlog::info(
-        "B06-08 MCU diagnostic survived Reset Communication: rx_count={}",
+        "EMCY consumer reset/rebind verification MCU diagnostic survived Reset Communication: rx_count={}",
         current.rx_count);
 
     if (!emitAndValidateVector(master, state, current, kVectorB,
-                               "B06-08 post-reset EMCY")
+                               "EMCY consumer reset/rebind verification post-reset EMCY")
         || !clearAndValidateRecovery(master, state, current,
-                                     "B06-08 post-reset recovery")) {
+                                     "EMCY consumer reset/rebind verification post-reset recovery")) {
         return false;
     }
 
@@ -637,18 +645,18 @@ bool validateResetRebind(CanopenTestMaster& master,
                 master, lely::canopen::NmtCommand::START,
                 CANOPEN_SLAVE_NODE_ID, lely::canopen::NmtState::START,
                 std::chrono::milliseconds(CANOPEN_WAIT_TIMEOUT_MS),
-                "B06 final NMT Start")) {
-            spdlog::error("B06-08 could not restore MCU Operational state");
+                "EMCY consumer validation final NMT Start")) {
+            spdlog::error("EMCY consumer reset/rebind verification could not restore MCU Operational state");
             return false;
         }
         state.remote_operational_restored = true;
     }
-    spdlog::info("B06-08 Reset Communication callback rebind passed");
+    spdlog::info("EMCY consumer reset/rebind verification Reset Communication callback rebind passed");
     return true;
 }
 
 /**
- * @brief Run all first-version B06 protocol checks after preflight.
+ * @brief Run all first-version EMCY consumer validation protocol checks after preflight.
  */
 bool runEmcyConsumerValidation(CanopenTestMaster& master,
                                EmcyConsumerRuntimeState& state)
@@ -656,29 +664,29 @@ bool runEmcyConsumerValidation(CanopenTestMaster& master,
     EmcyConsumerSnapshot current;
     if (!readStableSnapshot(master, current)) {
         spdlog::error(
-            "B06 MCU diagnostic 0x2301 is unavailable; enable the EMCY consumer diagnostic firmware option");
+            "EMCY consumer validation MCU diagnostic 0x2301 is unavailable; enable the EMCY consumer diagnostic firmware option");
         return false;
     }
-    spdlog::info("B06 diagnostic baseline: rx_count={}", current.rx_count);
+    spdlog::info("EMCY consumer validation diagnostic baseline: rx_count={}", current.rx_count);
 
     if (!emitAndValidateVector(master, state, current, kVectorA,
-                               "B06-01/02 single EMCY and MSEF")
+                               "EMCY consumer single-frame delivery and manufacturer-specific payload")
         || !emitAndValidateVector(master, state, current, kVectorB,
-                                  "B06-03 consecutive EMCY")) {
+                                  "EMCY consumer consecutive-message delivery")) {
         return false;
     }
 
     if (!clearAndValidateRecovery(master, state, current,
-                                  "B06-05 recovery")) {
+                                  "EMCY consumer recovery-message delivery")) {
         return false;
     }
 
     if (!emitAndValidateVector(master, state, current, kVectorA,
-                               "B06-04 duplicate EMCY first")
+                               "EMCY consumer duplicate-message first delivery")
         || !emitAndValidateVector(master, state, current, kVectorA,
-                                  "B06-04 duplicate EMCY second")
+                                  "EMCY consumer duplicate-message second delivery")
         || !clearAndValidateRecovery(master, state, current,
-                                     "B06-04 duplicate cleanup")) {
+                                     "EMCY consumer duplicate-message cleanup recovery")) {
         return false;
     }
 
@@ -690,7 +698,7 @@ bool runEmcyConsumerValidation(CanopenTestMaster& master,
 }
 
 /**
- * @brief Restore B06-owned Host/MCU state after success or failure.
+ * @brief Restore Host/MCU state owned by EMCY consumer validation after success or failure.
  */
 bool cleanupEmcyConsumerValidation(CanopenTestMaster& master,
                                    EmcyConsumerRuntimeState& state)
@@ -707,8 +715,8 @@ bool cleanupEmcyConsumerValidation(CanopenTestMaster& master,
                 master, lely::canopen::NmtCommand::START,
                 CANOPEN_SLAVE_NODE_ID, lely::canopen::NmtState::START,
                 std::chrono::milliseconds(CANOPEN_WAIT_TIMEOUT_MS),
-                "B06 cleanup NMT Start")) {
-            spdlog::error("B06 cleanup could not restore MCU Operational state");
+                "EMCY consumer validation cleanup NMT Start")) {
+            spdlog::error("EMCY consumer validation cleanup could not restore MCU Operational state");
             result = false;
         } else {
             state.remote_operational_restored = true;
@@ -735,7 +743,7 @@ int emcyConsumerProcess(CanopenTestMaster& master)
 
     if (result == 0) {
         spdlog::info(
-            "B06 EMCY consumer delivery, duplicate, recovery, SDO health, and reset rebind passed");
+            "EMCY consumer validation delivery, duplicate, recovery, SDO health, and reset rebind passed");
     }
     return result;
 }

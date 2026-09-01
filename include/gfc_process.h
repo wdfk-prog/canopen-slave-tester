@@ -1,12 +1,12 @@
 /**
  * @file
- * @brief J03/B09G GFC protocol validation interface.
+ * @brief GFC protocol validation interface.
  */
 
 #ifndef GFC_PROCESS_H
 #define GFC_PROCESS_H
 
-/** Enable J03/B09G Global Fail-safe Command validation. */
+/** Enable GFC (Global Fail-safe Command) protocol validation. */
 #define CANOPEN_ENABLE_GFC_PROCESS 0
 
 namespace lely {
@@ -25,7 +25,7 @@ class CanopenTestMaster;
  * injection and capture on CAN-ID 0x001.
  *
  * @param master Active Host CANopen master used for SDO/NMT control.
- * @param wire_channel Dedicated CAN channel used only by the GFC stage fixture.
+ * @param wire_channel Dedicated CAN channel used only by the GFC wire fixture.
  * @return Zero on success; otherwise a non-zero process result.
  */
 int gfcProcess(CanopenTestMaster& master, lely::io::CanChannel& wire_channel);

@@ -1,8 +1,19 @@
-/.venv-dcf-tools/
+# Local build output.
+build/
+build-*/
+cmake-build-*/
+compile_commands.json
+
+# Developer-specific cross-build and deployment settings.
+cmake/build_config.local.cmake
+deploy/local.conf
+
+# Local Python tooling environments.
+.venv/
+.venv-*/
 __pycache__/
-*.py[cod]
-/build/
-/cmake/build_config.local.cmake
-/deploy/local.conf
-/build-debug/
-config/generated/*.bin
+*.pyc
+
+# Editor/OS files.
+.vscode/*.log
+.DS_Store
