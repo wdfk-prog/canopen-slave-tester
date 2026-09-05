@@ -10,7 +10,7 @@
 - [架构设计](architecture.md)：Host 角色、Lely 运行时、流程顺序和 wire fixture 边界。
 - [配置说明](configuration.md)：编译开关、Node-ID、SocketCAN、DCF/EDS 和构建环境边界。
 - [测试与验证](testing.md)：每个协议流程实际验证什么，以及哪些结论仍必须由目标板/HIL 提供。
-- [CI/CD](ci-cd.md)：Cppcheck、真实 TQ8MP 交叉编译、GitHub Release 与 Doxygen Pages。
+- [CI/CD](ci-cd.md)：Cppcheck CI、TQ8MP Release 构建、GitHub Release 与 Doxygen Pages。
 - [部署](deployment.md)：目标板目录与部署脚本。
 - [故障排查](troubleshooting.md)：构建、CAN、DCF、self-hosted runner、Release 和 CI 常见问题。
 

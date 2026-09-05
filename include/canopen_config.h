@@ -32,15 +32,38 @@
 #define CANOPEN_MASTER_NODE_ID 127
 /** Managed MCU CANopen node-ID used by enabled master-side validation processes. */
 #define CANOPEN_SLAVE_NODE_ID 1
-/** Lely software slave node-ID used by NMT-master validation. */
+
+/** Legacy CANopenNode NMT-sequence peer profile. */
+#define CANOPEN_PEER_PROFILE_CANOPENNODE_NMT 1
+/** Lely RT-Thread B4 Master integration peer profile. */
+#define CANOPEN_PEER_PROFILE_LELY_RTT_B4 2
+/** Active BasicSlave peer profile used when CANOPEN_ROLE_SLAVE is selected. */
+#define CANOPEN_PEER_PROFILE CANOPEN_PEER_PROFILE_LELY_RTT_B4
+
+#if CANOPEN_PEER_PROFILE == CANOPEN_PEER_PROFILE_CANOPENNODE_NMT
+/** Lely software slave node-ID used by the legacy CANopenNode NMT test. */
 #define CANOPEN_PEER_NODE_ID 2
-/** Producer heartbeat period of the software slave peer, in milliseconds. */
+/** Producer heartbeat period of the legacy software peer, in milliseconds. */
 #define CANOPEN_PEER_HEARTBEAT_MS 500
+/** EDS reused by the legacy software peer. */
+#define CANOPEN_PEER_EDS_PATH "../config/project.eds"
+/** Passive NMT trace stays off because nmtMasterProcess() owns OnCommand(). */
+#define CANOPEN_ENABLE_PASSIVE_NMT_TRACE 0
+#elif CANOPEN_PEER_PROFILE == CANOPEN_PEER_PROFILE_LELY_RTT_B4
+/** Remote Node1 expected by lely-canopen-rtt B4 master.yml. */
+#define CANOPEN_PEER_NODE_ID 1
+/** Producer heartbeat period from the lely-canopen-rtt Node1 DCF, in milliseconds. */
+#define CANOPEN_PEER_HEARTBEAT_MS 1000
+/** Self-contained copy of the lely-canopen-rtt B4 Node1 text DCF. */
+#define CANOPEN_PEER_EDS_PATH "../config/lely_rtt_node1.dcf"
+/** Log each BasicSlave NMT transition callback without enforcing a fixed sequence. */
+#define CANOPEN_ENABLE_PASSIVE_NMT_TRACE 1
+#else
+#error "Unsupported CANOPEN_PEER_PROFILE"
+#endif /* CANOPEN_PEER_PROFILE == CANOPEN_PEER_PROFILE_CANOPENNODE_NMT */
 
 /** Master DCF path relative to the deployed executable directory. */
 #define CANOPEN_MASTER_DCF_PATH "../config/master.dcf"
-/** EDS reused by the Lely software slave; node-ID is overridden at runtime. */
-#define CANOPEN_PEER_EDS_PATH "../config/project.eds"
 
 /** SocketCAN receive queue capacity. */
 #define CANOPEN_CHANNEL_RX_QUEUE_SIZE 256

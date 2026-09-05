@@ -10,7 +10,7 @@ This directory contains the maintained English documentation for CANopen Slave T
 - [Architecture](architecture.md): roles, Lely runtime, process ordering, and wire-fixture boundaries.
 - [Configuration](configuration.md): compile-time switches, node IDs, SocketCAN settings, DCF/EDS inputs, and build-environment boundaries.
 - [Testing and validation](testing.md): what each protocol process validates and what still requires target/HIL evidence.
-- [CI/CD](ci-cd.md): Cppcheck, real TQ8MP cross-builds, GitHub Releases, and Doxygen Pages.
+- [CI/CD](ci-cd.md): Cppcheck CI, TQ8MP release builds, GitHub Releases, and Doxygen Pages.
 - [Deployment](deployment.md): target-board layout and deploy helpers.
 - [Troubleshooting](troubleshooting.md): build, CAN, DCF, self-hosted runner, Release, and CI failures.
 

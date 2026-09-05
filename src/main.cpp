@@ -20,6 +20,7 @@
 #include "storage_process.h"
 #include "srdo_process.h"
 #include "shutdown_process.h"
+#include "slave_peer_trace.h"
 #include "sync_pdo_process.h"
 #include "time_process.h"
 
@@ -416,14 +417,16 @@ int runCanopenSlave(lely::io::Context& context, lely::ev::Loop& loop,
                     lely::io::CanChannel& channel)
 {
     int error_count = 0;
-    /* Reuse the MCU-provided project.eds unchanged and do not load a concise
-     * DCF for the software peer. The validation process normalizes Node 2 with
-     * MCU-issued NMT commands instead of changing EDS startup behavior. */
+    /* The selected peer profile supplies a text EDS/DCF and Node-ID. No concise
+     * DCF is loaded, keeping the fixture behavior explicit in the text file. */
     lely::canopen::BasicSlave slave(
         executor, timer, channel, CANOPEN_PEER_EDS_PATH,
         "", CANOPEN_PEER_NODE_ID);
     slave.OnCanState(canStateCallback);
     slave.OnCanError(canErrorCallback);
+#if CANOPEN_ENABLE_PASSIVE_NMT_TRACE
+    installSlavePeerNmtTrace(slave);
+#endif /* CANOPEN_ENABLE_PASSIVE_NMT_TRACE */
 
     std::thread canopen_thread;
     if (!startCanopenWorker(loop, canopen_thread)) {
@@ -441,16 +444,24 @@ int runCanopenSlave(lely::io::Context& context, lely::ev::Loop& loop,
                  CANOPEN_PEER_NODE_ID);
 
 #if CANOPEN_ENABLE_NMT_MASTER_PROCESS
-    /* This role is the controlled node. The DUT must initiate the NMT command
-     * sequence; the peer only observes commands and verifies its own states. */
+#if CANOPEN_PEER_PROFILE != CANOPEN_PEER_PROFILE_CANOPENNODE_NMT
+#error "nmtMasterProcess requires CANOPEN_PEER_PROFILE_CANOPENNODE_NMT"
+#endif /* CANOPEN_PEER_PROFILE != CANOPEN_PEER_PROFILE_CANOPENNODE_NMT */
+    /* This legacy mode owns OnCommand() and enforces its historical sequence. */
     error_count += nmtMasterProcess(slave);
 #else
-    spdlog::info("NMT master validation disabled; waiting for Ctrl+C");
+    spdlog::info(
+        "Passive CANopen slave peer ready: profile={} node={} dcf={}; waiting for Ctrl+C",
+        CANOPEN_PEER_PROFILE, CANOPEN_PEER_NODE_ID, CANOPEN_PEER_EDS_PATH);
     while (g_stop_requested == 0
            && g_canopen_loop_running.load(std::memory_order_acquire)) {
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
 #endif /* CANOPEN_ENABLE_NMT_MASTER_PROCESS */
+
+#if CANOPEN_ENABLE_PASSIVE_NMT_TRACE
+    uninstallSlavePeerNmtTrace(slave);
+#endif /* CANOPEN_ENABLE_PASSIVE_NMT_TRACE */
 
     if (g_stop_requested == 0
         && !g_canopen_loop_running.load(std::memory_order_acquire)) {
