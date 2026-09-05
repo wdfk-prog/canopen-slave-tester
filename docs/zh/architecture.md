@@ -7,7 +7,7 @@
 可执行文件通过编译期 `CANOPEN_ROLE` 选择两种 Host 角色：
 
 - `CANOPEN_ROLE_MASTER`：Lely `AsyncMaster`，本地 Node-ID 127，按启用配置驱动对 MCU Node 1 的协议验证。
-- `CANOPEN_ROLE_SLAVE`：Lely `BasicSlave`，本地 Node-ID 2，作为标准 CANopen peer，由 MCU 发起 NMT Master 行为验证。
+- `CANOPEN_ROLE_SLAVE`：Lely `BasicSlave`，可选择 Node 1 的 lely-rtt B4 被动 profile，或 Node 2 的历史 CANopenNode NMT 严格序列 profile。
 
 两种角色共用 SocketCAN/Lely event loop 初始化和同一个 `canopen_master` 构建 target。
 
@@ -78,4 +78,4 @@ flowchart LR
 
 ## 构建环境边界
 
-`CANOPEN_NATIVE_BUILD=ON` 仅保留为可选的本机 Host 构建模式。CI 与 Release 使用默认 TQ8MP 交叉构建契约，直接依赖项目 Yocto SDK 与目标架构 Lely stage。构建环境选择不会改变 CANopen role、协议逻辑、流程顺序、OD 契约或运行时 ownership。
+`CANOPEN_NATIVE_BUILD=ON` 仅保留为可选的本机 Host 构建模式。CI 仅执行 Cppcheck；Release 使用默认 TQ8MP 交叉构建契约，直接依赖项目 Yocto SDK 与目标架构 Lely stage。构建环境选择不会改变 CANopen role、协议逻辑、流程顺序、OD 契约或运行时 ownership。

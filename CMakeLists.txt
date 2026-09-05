@@ -208,6 +208,7 @@ endif()
 install(TARGETS ${TARGET_NAME} RUNTIME DESTINATION bin)
 install(FILES
     config/project.eds
+    config/lely_rtt_node1.dcf
     config/master.yml
     config/generated/master.dcf
     config/generated/mcu_node_1.bin

@@ -14,7 +14,7 @@ cp deploy/local.conf.example deploy/local.conf
 
 ## CMake deployment target
 
-The deployment helpers are available in the default TQ8MP cross-build mode. CI and Release use this same target build contract on the self-hosted TQ8MP runner.
+The deployment helpers are available in the default TQ8MP cross-build mode. Release builds use this target build contract on the self-hosted TQ8MP runner; CI is Cppcheck-only.
 
 After a successful target build:
 

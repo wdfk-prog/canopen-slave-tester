@@ -86,4 +86,4 @@ See [Deployment](deployment.md) before using password-based SSH or modifying the
 
 ## Optional native host build
 
-`CANOPEN_NATIVE_BUILD=ON` remains available for explicit local host-side experiments with a compatible native Lely installation. It is not used by CI or Release. CI and Release use the real TQ8MP Yocto SDK on the self-hosted runner described in [CI/CD](ci-cd.md).
+`CANOPEN_NATIVE_BUILD=ON` remains available for explicit local host-side experiments with a compatible native Lely installation. It is not used by CI or Release. CI is Cppcheck-only; Release uses the real TQ8MP Yocto SDK on the self-hosted runner described in [CI/CD](ci-cd.md).

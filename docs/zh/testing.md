@@ -28,7 +28,7 @@ Host 测试主要组合三类证据：
 | EMCY consumer | Host local EMCY producer + MCU diagnostic OD | MCU EMCY consumer diagnostic record |
 | GFC | MCU 0x1300/0x2302 + 固定 CAN-ID 0x001 fixture | CANopenNode GFC consumer/producer diagnostic |
 | SRDO | MCU SRDO 控制/状态 + 成对 wire capture/fault case | 已配置测试使用的 CANopenNode SRDO profile |
-| NMT Master behavior | Lely `BasicSlave` 状态 callback | MCU 作为 NMT Master 主动控制 Node 2 |
+| NMT Master behavior | Lely `BasicSlave` 状态 callback | MCU 作为 NMT Master 主动控制所选 Node 1/2 peer |
 
 ## 当前默认配置
 
@@ -53,7 +53,7 @@ Final Reset Communication 是独立退出动作，由 `CANOPEN_ENABLE_FINAL_RESE
 - MCU 日志或 diagnostic OD snapshot；
 - 实际总线/目标板时序测量。
 
-TQ8MP CI/Release 交叉编译不提供这些 HIL 结论。
+Cppcheck CI 与 TQ8MP Release 交叉编译都不提供这些 HIL 结论。
 
 ## 协议专项
 

@@ -7,7 +7,7 @@
 The executable has two compile-time Host roles selected by `CANOPEN_ROLE`:
 
 - `CANOPEN_ROLE_MASTER`: Lely `AsyncMaster`, local Node-ID 127, drives the enabled validation processes against MCU Node 1.
-- `CANOPEN_ROLE_SLAVE`: Lely `BasicSlave`, local Node-ID 2, acts as a standards-based peer while the MCU performs NMT-master validation.
+- `CANOPEN_ROLE_SLAVE`: Lely `BasicSlave` with a selectable Node 1 lely-rtt B4 passive profile or Node 2 legacy CANopenNode NMT-sequence profile.
 
 Both roles share the same SocketCAN/Lely event-loop setup and the same `canopen_master` executable target.
 
@@ -78,4 +78,4 @@ Changes to baseline CANopen communication parameters should be made in the confi
 
 ## Build-environment boundary
 
-`CANOPEN_NATIVE_BUILD=ON` remains an optional local host-build mode only. CI and Release use the default TQ8MP cross-build contract with the project Yocto SDK and target Lely stage. Build-environment selection does not change CANopen roles, protocol logic, process ordering, Object Dictionary contracts, or runtime ownership.
+`CANOPEN_NATIVE_BUILD=ON` remains an optional local host-build mode only. CI performs Cppcheck only; Release uses the default TQ8MP cross-build contract with the project Yocto SDK and target Lely stage. Build-environment selection does not change CANopen roles, protocol logic, process ordering, Object Dictionary contracts, or runtime ownership.

@@ -8,17 +8,17 @@
 
 CANopen Slave Tester is a Linux host-side CANopen protocol validation application built on Lely CANopen. It is used with an RT-Thread + CANopenNode MCU device to validate protocol behavior through standard CANopen services, observable Object Dictionary data, and bounded wire-level fixtures where a high-level Lely service is unavailable.
 
-The deployed target is the TQ8MP Linux/aarch64 environment built with the project-specific Yocto SDK. CI and release builds use the same real TQ8MP cross toolchain on a dedicated self-hosted GitHub Actions runner; tagged releases publish target binaries to GitHub Releases.
+The deployed target is the TQ8MP Linux/aarch64 environment built with the project-specific Yocto SDK. CI reports Cppcheck results on a GitHub-hosted runner, while release builds use the real TQ8MP cross toolchain on a dedicated self-hosted runner.
 
 ## Features
 
 - Lely `AsyncMaster` test role with configurable CANopen validation processes.
-- Lely `BasicSlave` peer role for MCU NMT-master validation.
+- Lely `BasicSlave` peer role with selectable CANopenNode sequence and lely-canopen-rtt B4 integration profiles.
 - Heartbeat, SDO, PDO, SYNC, TIME, EMCY producer/consumer, storage, GFC, SRDO, and MCU SDO-client validation modules.
 - Fail-fast ordered process execution and final Reset Communication cleanup.
 - SocketCAN runtime with bitrate verification and asynchronous spdlog logging.
 - TQ8MP Yocto cross-build/deploy workflow retained as the default build path.
-- GitHub Actions CI with non-blocking Cppcheck reporting and real TQ8MP Yocto cross-compilation.
+- GitHub Actions CI with non-blocking Cppcheck reporting.
 - GitHub Release CD that packages the TQ8MP/aarch64 executable, configuration, target Lely shared libraries, and SHA-256 checksum.
 - Doxygen API documentation published through GitHub Pages.
 - Bilingual maintained documentation under `docs/en/` and `docs/zh/`.
@@ -54,10 +54,10 @@ canopen-slave-tester/
 flowchart TD
     App[canopen_master] --> Role{CANOPEN_ROLE}
     Role -->|Master| Master[Lely AsyncMaster / Node 127]
-    Role -->|Slave| Peer[Lely BasicSlave / Node 2]
+    Role -->|Slave| Peer[Lely BasicSlave / selectable Node 1 or 2]
     Master --> Processes[Enabled validation processes]
     Master --> DCF[master.dcf + concise DCF]
-    Peer --> NMT[NMT-master behavior validation]
+    Peer --> NMT[NMT validation or passive lely-rtt integration peer]
     Processes --> MCU[RT-Thread + CANopenNode / Node 1]
     Master --> CAN[SocketCAN can1]
     Peer --> CAN
@@ -84,7 +84,7 @@ See [Getting started](docs/en/getting-started.md) and [Deployment](docs/en/deplo
 
 ## CI, release, and API documentation
 
-The TQ8MP compile job and release job run on a self-hosted runner labeled `tq8mp-yocto`. The runner must have the real Yocto SDK and target-architecture Lely stage installed. Repository Actions variables provide their roots:
+The release build runs on a self-hosted runner labeled `tq8mp-yocto`. The runner must have the real Yocto SDK and target-architecture Lely stage installed. Repository Actions variables provide their roots:
 
 - `TQ8MP_YOCTO_SDK_ROOT`
 - `TQ8MP_LELY_STAGE_ROOT`
@@ -126,7 +126,7 @@ See [Testing and validation](docs/en/testing.md) for fixture and evidence bounda
 
 ## Important boundaries
 
-- CI/release compilation verifies the TQ8MP cross-build surface, but it is not target-board runtime or HIL verification.
+- CI reports Cppcheck findings only; the TQ8MP release build is compile/link evidence, not target-board runtime or HIL verification.
 - GFC/SRDO protocol tests do not establish SIL, PL, or functional-safety certification.
 - Generated DCF/EDS files must remain synchronized with the MCU Object Dictionary when communication parameters change.
 - The repository currently has no top-level project license file. The vendored spdlog tree retains its own license information; release packages reuse the target-architecture Lely stage configured on the TQ8MP build runner.

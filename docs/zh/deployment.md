@@ -14,7 +14,7 @@ cp deploy/local.conf.example deploy/local.conf
 
 ## CMake 部署 target
 
-部署 helper 使用默认 TQ8MP 交叉编译模式。CI 与 Release 在 self-hosted TQ8MP runner 上复用同一套目标构建契约。
+部署 helper 使用默认 TQ8MP 交叉编译模式。Release 在 self-hosted TQ8MP runner 上复用同一套目标构建契约；CI 不再执行 TQ8MP 交叉编译。
 
 完成目标交叉构建后：
 

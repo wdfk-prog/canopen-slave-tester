@@ -28,7 +28,7 @@ A process returning PASS only proves the assertions implemented by that process.
 | EMCY consumer | Host local EMCY producer + MCU diagnostic OD | MCU EMCY consumer diagnostic record |
 | GFC | MCU 0x1300/0x2302 + fixed CAN-ID 0x001 fixture | CANopenNode GFC consumer/producer diagnostic support |
 | SRDO | MCU SRDO control/status + paired wire capture/fault cases | CANopenNode SRDO profile configured for the test |
-| NMT master behavior | Lely `BasicSlave` state callbacks | MCU acts as NMT master and drives Node 2 |
+| NMT master behavior | Lely `BasicSlave` state callbacks | MCU acts as NMT master and drives the selected Node 1/2 peer |
 
 ## Current checked-in profile
 
@@ -53,7 +53,7 @@ Depending on the process, complete target acceptance may still require:
 - firmware-side logs or diagnostic OD snapshots;
 - timing measurements on the actual bus/target.
 
-The TQ8MP CI/Release cross-build does not provide any of these HIL results.
+Neither Cppcheck CI nor the TQ8MP Release cross-build provides any of these HIL results.
 
 ## Protocol-specific pages
 

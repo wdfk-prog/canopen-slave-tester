@@ -4,7 +4,7 @@
 
 The automation is split into three independent GitHub Actions workflows:
 
-- `.github/workflows/ci.yml`: Cppcheck reporting plus a real TQ8MP Yocto cross-build;
+- `.github/workflows/ci.yml`: Cppcheck reporting;
 - `.github/workflows/release.yml`: tag/manual TQ8MP build and GitHub Release publication;
 - `.github/workflows/pages-doxygen.yml`: Doxygen generation and GitHub Pages deployment.
 
@@ -12,7 +12,7 @@ No GHCR/container-image publication is used.
 
 ## Self-hosted TQ8MP build runner
 
-The cross-build jobs intentionally use a self-hosted runner because the project-specific Yocto SDK and target Lely stage are local build dependencies that are not present on GitHub-hosted runners.
+The TQ8MP release build uses a self-hosted runner because the project-specific Yocto SDK and target Lely stage are local build dependencies that are not present on GitHub-hosted runners.
 
 Register a Linux x86-64 self-hosted runner for this repository and add the custom label:
 
@@ -36,11 +36,11 @@ Configure these non-secret repository variables under **Settings -> Secrets and 
 | `TQ8MP_YOCTO_SDK_ROOT` | Root directory of the installed TQ8MP Yocto SDK | `/opt/fsl-imx-xwayland/6.1-mickledore` |
 | `TQ8MP_LELY_STAGE_ROOT` | Target-architecture Lely install/stage prefix | `/home/<user>/share/lely-imx8p/lely-core/build-imx8p/stage/usr` |
 
-The workflows derive the exact compiler and sysroot paths from those roots. They fail closed when the SDK compiler, target sysroot, or Lely metadata is missing.
+The release workflow derives the exact compiler and sysroot paths from those roots. It fails closed when the SDK compiler, target sysroot, or Lely metadata is missing.
 
 ## CI: `.github/workflows/ci.yml`
 
-CI is triggered on push, pull requests targeting `master`/`main`, and manual dispatch. Cppcheck runs for all of those events. The self-hosted TQ8MP cross-build runs only for trusted push/manual events and is skipped for `pull_request` so untrusted PR code is never executed on the private build runner.
+CI is triggered on push, pull requests targeting `master`/`main`, and manual dispatch. The workflow now contains only the GitHub-hosted Cppcheck reporting job; TQ8MP cross-compilation remains a release-only path.
 
 ### Cppcheck report
 
@@ -51,23 +51,6 @@ Cppcheck runs on a GitHub-hosted Ubuntu runner and analyzes only project-owned `
 - missing external/system include noise is suppressed;
 - findings are written to the job log and `cppcheck.txt` artifact;
 - findings do not fail CI, while tool/workflow execution failures still fail the job.
-
-### TQ8MP cross-build
-
-The second job runs on `[self-hosted, linux, x64, tq8mp-yocto]` and uses the real project SDK, not a native/container build.
-
-It dynamically creates the same CMake local configuration contract used by developer builds, then runs:
-
-```sh
-cmake -S . -B build-ci-tq8mp \
-  -DCANOPEN_LOCAL_BUILD_CONFIG=<generated-config> \
-  -DCMAKE_BUILD_TYPE=MinSizeRel
-cmake --build build-ci-tq8mp --parallel
-```
-
-After linking, the job validates the ELF header with the Yocto `aarch64-poky-linux-readelf` and requires `Machine: AArch64`.
-
-This proves the checked-in source can be cross-compiled with the configured TQ8MP SDK/Lely stage. It is still not target-board runtime, SocketCAN, timing, or HIL evidence.
 
 ## GitHub Release CD: `.github/workflows/release.yml`
 
@@ -125,4 +108,4 @@ https://wdfk-prog.github.io/canopen-slave-tester/
 
 ## Release and validation boundary
 
-Before publishing a production release, keep target-board/HIL acceptance separate from the build pipeline. A green cross-build establishes compiler/linker compatibility for the configured SDK; it does not prove CAN bus health, runtime permissions, target filesystem compatibility, physical wiring, protocol timing, or DUT behavior.
+Before publishing a production release, keep target-board/HIL acceptance separate from CI and release packaging. The CI workflow reports static Cppcheck results only. A successful TQ8MP release build establishes compiler/linker compatibility for the configured SDK, not CAN bus health, runtime permissions, target filesystem compatibility, physical wiring, protocol timing, or DUT behavior.

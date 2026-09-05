@@ -4,7 +4,7 @@
 
 自动化现在拆为三个独立的 GitHub Actions workflow：
 
-- `.github/workflows/ci.yml`：Cppcheck 报告 + 真实 TQ8MP Yocto 交叉编译；
+- `.github/workflows/ci.yml`：Cppcheck 报告；
 - `.github/workflows/release.yml`：tag/手动触发 TQ8MP 构建并发布 GitHub Release；
 - `.github/workflows/pages-doxygen.yml`：生成 Doxygen 并部署 GitHub Pages。
 
@@ -12,7 +12,7 @@
 
 ## Self-hosted TQ8MP 构建 Runner
 
-TQ8MP 交叉编译 job 使用 self-hosted runner。原因是项目实际使用的 Yocto SDK 和目标架构 Lely stage 属于本机构建依赖，GitHub Hosted Runner 默认没有这些文件。
+TQ8MP Release 构建 job 使用 self-hosted runner。原因是项目实际使用的 Yocto SDK 和目标架构 Lely stage 属于本机构建依赖，GitHub Hosted Runner 默认没有这些文件。
 
 在仓库中注册一个 Linux x86-64 self-hosted runner，并增加自定义标签：
 
@@ -46,11 +46,11 @@ GitHub 仓库
 | `TQ8MP_YOCTO_SDK_ROOT` | 已安装的 TQ8MP Yocto SDK 根目录 | `/opt/fsl-imx-xwayland/6.1-mickledore` |
 | `TQ8MP_LELY_STAGE_ROOT` | 面向目标架构构建的 Lely stage/install 前缀 | `/home/<user>/share/lely-imx8p/lely-core/build-imx8p/stage/usr` |
 
-Workflow 会根据这两个根目录推导真实 compiler、sysroot、Lely include/lib。任何路径不存在都会直接失败，不会退回 native 编译冒充 TQ8MP 构建。
+Release workflow 会根据这两个根目录推导真实 compiler、sysroot、Lely include/lib。任何路径不存在都会直接失败，不会退回 native 编译冒充 TQ8MP 构建。
 
 ## CI：`.github/workflows/ci.yml`
 
-CI 在 push、目标为 `master`/`main` 的 Pull Request，以及手动触发时运行。Cppcheck 会覆盖这些事件；self-hosted TQ8MP 交叉编译只在可信的 push/手动触发中执行，并在 `pull_request` 事件中跳过，避免不受信任的 PR 代码进入私有构建机。
+CI 在 push、目标为 `master`/`main` 的 Pull Request，以及手动触发时运行。当前 `ci.yml` 只包含 GitHub Hosted Runner 上的 Cppcheck 报告 job；TQ8MP 交叉编译仅保留在 Release workflow。
 
 ### Cppcheck 报告
 
@@ -61,31 +61,6 @@ Cppcheck 使用 GitHub Hosted Ubuntu Runner，只分析项目自身的 `src/` �
 - 屏蔽外部/系统头文件缺失噪声；
 - finding 输出到 job 日志和 `cppcheck.txt` artifact；
 - finding 不导致 CI 失败，但 Cppcheck 安装、命令执行、artifact 上传等真正的 workflow 错误仍会失败。
-
-### TQ8MP 真实交叉编译
-
-第二个 job 运行在：
-
-```text
-[self-hosted, linux, x64, tq8mp-yocto]
-```
-
-它使用真实项目 SDK，而不是 native Linux 或 Docker 编译。Workflow 会在 `$RUNNER_TEMP` 生成与开发机 `cmake/build_config.local.cmake` 同契约的临时配置，然后执行：
-
-```sh
-cmake -S . -B build-ci-tq8mp \
-  -DCANOPEN_LOCAL_BUILD_CONFIG=<generated-config> \
-  -DCMAKE_BUILD_TYPE=MinSizeRel
-cmake --build build-ci-tq8mp --parallel
-```
-
-链接完成后再调用 Yocto SDK 自带的 `aarch64-poky-linux-readelf` 检查 ELF Header，要求：
-
-```text
-Machine: AArch64
-```
-
-因此这个 job 能证明当前提交确实经过 TQ8MP SDK 交叉编译。但它仍不能代替目标板运行、SocketCAN、实时性和 HIL 验证。
 
 ## GitHub Release CD：`.github/workflows/release.yml`
 
@@ -151,4 +126,4 @@ https://wdfk-prog.github.io/canopen-slave-tester/
 
 ## Release 与验证边界
 
-正式发布前仍应把目标板/HIL 验收与编译流水线分开看待。CI/Release green 只能证明当前源码能使用配置的 TQ8MP SDK/Lely 完成交叉编译和链接，不能证明 CAN 总线健康、目标端权限/文件系统、物理接线、协议实时性或 DUT 行为全部通过。
+正式发布前仍应把目标板/HIL 验收与 CI、Release 构建分开看待。CI 只提供 Cppcheck 静态结果；成功的 TQ8MP Release 构建只能证明编译/链接兼容性，不能证明 CAN 总线健康、目标端权限/文件系统、物理接线、协议实时性或 DUT 行为全部通过。

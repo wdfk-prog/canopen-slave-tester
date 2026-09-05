@@ -8,17 +8,17 @@
 
 CANopen Slave Tester 是基于 Lely CANopen 的 Linux Host 侧 CANopen 协议验证程序，用于配合 RT-Thread + CANopenNode MCU，通过标准 CANopen 服务、可观察的 Object Dictionary 数据，以及少量高层 Lely API 未覆盖的固定 wire-level fixture 验证协议行为。
 
-实际部署目标是使用项目 Yocto SDK 构建的 TQ8MP Linux/aarch64。CI 与 Release 构建都在专用 self-hosted GitHub Actions runner 上使用真实 TQ8MP Yocto SDK 交叉编译；tag 发布的是目标架构二进制，不再发布 GHCR 镜像。
+实际部署目标是使用项目 Yocto SDK 构建的 TQ8MP Linux/aarch64。CI 仅在 GitHub Hosted Runner 上执行 Cppcheck；Release 构建仍在专用 self-hosted Runner 上使用真实 TQ8MP Yocto SDK 交叉编译并发布目标架构二进制。
 
 ## 功能特性
 
 - 基于 Lely `AsyncMaster` 的测试主站角色，可按编译开关组合协议验证流程。
-- 基于 Lely `BasicSlave` 的测试从站角色，用于验证 MCU 的 NMT Master 行为。
+- 基于 Lely `BasicSlave` 的测试从站角色，支持 CANopenNode 严格 NMT 序列和 lely-canopen-rtt B4 被动集成两种 profile。
 - 覆盖 Heartbeat、SDO、PDO、SYNC、TIME、EMCY producer/consumer、Storage、GFC、SRDO 和 MCU SDO Client。
 - 固定顺序、fail-fast 的自动验证流程，以及退出时的 Reset Communication 清理。
 - SocketCAN 运行时、bitrate 校验和 spdlog 异步日志。
 - 保留 TQ8MP Yocto 交叉编译与部署方式作为默认构建路径。
-- GitHub Actions CI：Cppcheck 非阻断报告 + 真实 TQ8MP Yocto 交叉编译。
+- GitHub Actions CI：仅保留 Cppcheck 非阻断报告。
 - GitHub Release CD：发布 TQ8MP/aarch64 可执行文件、配置、目标 Lely 共享库和 SHA-256。
 - Doxygen API 文档通过 GitHub Pages 发布。
 - `docs/en/` 与 `docs/zh/` 维护中英文项目文档。
@@ -54,10 +54,10 @@ canopen-slave-tester/
 flowchart TD
     App[canopen_master] --> Role{CANOPEN_ROLE}
     Role -->|Master| Master[Lely AsyncMaster / Node 127]
-    Role -->|Slave| Peer[Lely BasicSlave / Node 2]
+    Role -->|Slave| Peer[Lely BasicSlave / selectable Node 1 or 2]
     Master --> Processes[已启用协议验证流程]
     Master --> DCF[master.dcf + concise DCF]
-    Peer --> NMT[NMT Master 行为验证]
+    Peer --> NMT[NMT validation or passive lely-rtt integration peer]
     Processes --> MCU[RT-Thread + CANopenNode / Node 1]
     Master --> CAN[SocketCAN can1]
     Peer --> CAN
@@ -84,7 +84,7 @@ cmake --build build --parallel
 
 ## CI、Release 与 API 文档
 
-TQ8MP 编译检查和 Release 构建都运行在带 `tq8mp-yocto` 标签的 self-hosted runner。该 runner 必须安装真实 Yocto SDK 和目标架构 Lely stage，并在仓库 Actions Variables 中配置：
+Release 构建运行在带 `tq8mp-yocto` 标签的 self-hosted runner。该 runner 必须安装真实 Yocto SDK 和目标架构 Lely stage，并在仓库 Actions Variables 中配置：
 
 - `TQ8MP_YOCTO_SDK_ROOT`
 - `TQ8MP_LELY_STAGE_ROOT`
@@ -126,7 +126,7 @@ Doxygen 站点发布到 [GitHub Pages](https://wdfk-prog.github.io/canopen-slave
 
 ## 重要边界
 
-- CI/Release 已使用 TQ8MP SDK 交叉编译，但仍不等价于目标板运行或 HIL 验证。
+- CI 仅提供 Cppcheck 结果；TQ8MP Release 构建只提供编译/链接证据，仍不等价于目标板运行或 HIL 验证。
 - GFC/SRDO 协议测试不构成 SIL、PL 或功能安全认证。
 - 通信参数变化后必须同步 MCU Object Dictionary 与生成的 DCF/EDS。
 - 当前仓库没有顶层项目 LICENSE 文件；vendored spdlog 保留其自身许可证；Release 包中的 Lely 共享库来自 TQ8MP build runner 配置的目标架构 Lely stage。

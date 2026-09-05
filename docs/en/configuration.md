@@ -13,12 +13,22 @@
 | `CANOPEN_EXPECTED_BITRATE` | `1000000` | Expected nominal bitrate, bit/s |
 | `CANOPEN_MASTER_NODE_ID` | `127` | Lely master Node-ID |
 | `CANOPEN_SLAVE_NODE_ID` | `1` | MCU Node-ID |
-| `CANOPEN_PEER_NODE_ID` | `2` | Lely `BasicSlave` peer Node-ID |
-| `CANOPEN_PEER_HEARTBEAT_MS` | `500` | Software peer heartbeat period |
+| `CANOPEN_PEER_PROFILE` | `CANOPEN_PEER_PROFILE_LELY_RTT_B4` | Selects the BasicSlave fixture contract |
+| `CANOPEN_PEER_NODE_ID` | `1` for the default profile | Lely `BasicSlave` peer Node-ID |
+| `CANOPEN_PEER_HEARTBEAT_MS` | `1000` for the default profile | Software peer heartbeat period |
 | `CANOPEN_WAIT_TIMEOUT_MS` | `5000` | Shared Boot/NMT wait budget |
 | `CANOPEN_CHANNEL_RX_QUEUE_SIZE` | `256` | Lely CAN receive queue |
 | `CANOPEN_LOG_QUEUE_SIZE` | `8192` | spdlog async queue |
 | `CANOPEN_LOG_WORKER_COUNT` | `1` | spdlog worker count |
+
+## BasicSlave peer profiles
+
+`CANOPEN_ROLE_SLAVE` uses `CANOPEN_PEER_PROFILE` to select one of two compatible fixture contracts:
+
+- `CANOPEN_PEER_PROFILE_LELY_RTT_B4` (default): Node 1, `config/lely_rtt_node1.dcf`, 1000 ms heartbeat, passive NMT transition callback tracing, and no fixed command-order assertion. Use this with `lely-canopen-rtt` B4 Master integration/HIL tests.
+- `CANOPEN_PEER_PROFILE_CANOPENNODE_NMT`: Node 2, `config/project.eds`, 500 ms heartbeat, and the historical strict `nmtMasterProcess()` sequence. Select this profile before setting `CANOPEN_ENABLE_NMT_MASTER_PROCESS=1`.
+
+The lely-rtt profile deliberately keeps `CANOPEN_ENABLE_NMT_MASTER_PROCESS=0`: Lely NMT boot may emit Reset Communication before a manually driven START/STOP/PREOP sequence, so a fixed callback order would create fixture false failures.
 
 ## Validation switches
 
@@ -66,7 +76,7 @@ Do not commit machine-local paths or credentials. Both local configuration files
 
 ## Optional native host build
 
-Set `CANOPEN_NATIVE_BUILD=ON` only for an explicit local host build with a compatible native Linux Lely installation. CI and Release workflows do not use this mode; they use the real TQ8MP cross toolchain.
+Set `CANOPEN_NATIVE_BUILD=ON` only for an explicit local host build with a compatible native Linux Lely installation. CI does not build the target; the Release workflow uses the real TQ8MP cross toolchain.
 
 Required variables:
 

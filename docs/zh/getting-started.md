@@ -86,4 +86,4 @@ cmake --build build --target download
 
 ## 可选 Native Host 构建
 
-`CANOPEN_NATIVE_BUILD=ON` 仅保留给明确需要的本机 Host 侧实验，并要求存在兼容的 native Lely 安装。CI 与 Release 不使用这个模式，而是使用 [CI/CD](ci-cd.md) 中说明的 self-hosted runner 和真实 TQ8MP Yocto SDK。
+`CANOPEN_NATIVE_BUILD=ON` 仅保留给明确需要的本机 Host 侧实验，并要求存在兼容的 native Lely 安装。CI 仅执行 Cppcheck；Release 使用 [CI/CD](ci-cd.md) 中说明的 self-hosted runner 和真实 TQ8MP Yocto SDK。
