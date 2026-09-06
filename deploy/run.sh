@@ -22,6 +22,7 @@ Environment variables:
   CANOPEN_MASTER_DCF_PATH      Local master.dcf path
   CANOPEN_PROJECT_EDS_PATH     Local project.eds path
   CANOPEN_MCU_NODE_DCF_PATH    Local mcu_node_1.bin path
+  CANOPEN_NODE1_DCF_PATH       Local node1.dcf path; defaults to config/node1.dcf when present
   CANOPEN_GDB_PORT             gdbserver port; defaults to 9091
 USAGE
 }
@@ -69,6 +70,7 @@ cleanup_remote_staging()
         "$TARGET_PATH" "$TARGET_CONFIG_PATH" \
         "$REMOTE_EXECUTABLE_UPLOAD" "$REMOTE_MASTER_DCF_UPLOAD" \
         "$REMOTE_PROJECT_EDS_UPLOAD" "$REMOTE_MCU_NODE_DCF_UPLOAD" \
+        "$REMOTE_NODE1_DCF_UPLOAD" \
         >/dev/null 2>&1 <<'REMOTE_CLEANUP' || true
 set -eu
 target_path=$1
@@ -77,12 +79,14 @@ remote_executable_upload=$3
 remote_master_dcf_upload=$4
 remote_project_eds_upload=$5
 remote_mcu_node_dcf_upload=$6
+remote_node1_dcf_upload=$7
 
 rm -f \
     "$target_path/$remote_executable_upload" \
     "$config_path/$remote_master_dcf_upload" \
     "$config_path/$remote_project_eds_upload" \
-    "$config_path/$remote_mcu_node_dcf_upload"
+    "$config_path/$remote_mcu_node_dcf_upload" \
+    "$config_path/$remote_node1_dcf_upload"
 REMOTE_CLEANUP
 }
 
@@ -150,6 +154,7 @@ fi
 LOCAL_MASTER_DCF=${CANOPEN_MASTER_DCF_PATH:-$PROJECT_ROOT/config/generated/master.dcf}
 LOCAL_PROJECT_EDS=${CANOPEN_PROJECT_EDS_PATH:-$PROJECT_ROOT/config/project.eds}
 LOCAL_MCU_NODE_DCF=${CANOPEN_MCU_NODE_DCF_PATH:-$PROJECT_ROOT/config/generated/mcu_node_1.bin}
+LOCAL_NODE1_DCF=${CANOPEN_NODE1_DCF_PATH:-$PROJECT_ROOT/config/node1.dcf}
 GDB_PORT=${CANOPEN_GDB_PORT:-9091}
 
 case "$TARGET_PATH" in
@@ -197,6 +202,12 @@ require_regular_file "The local master DCF" "$LOCAL_MASTER_DCF"
 require_regular_file "The local project EDS" "$LOCAL_PROJECT_EDS"
 require_regular_file "The local MCU concise DCF" "$LOCAL_MCU_NODE_DCF"
 
+DEPLOY_NODE1_DCF=false
+if [ -n "${CANOPEN_NODE1_DCF_PATH:-}" ] || [ -e "$LOCAL_NODE1_DCF" ]; then
+    require_regular_file "The local Node1 DCF" "$LOCAL_NODE1_DCF"
+    DEPLOY_NODE1_DCF=true
+fi
+
 validate_target_host "$TARGET_IP"
 setup_ssh_connection "$TARGET_IP"
 
@@ -212,6 +223,7 @@ REMOTE_EXECUTABLE_UPLOAD=".${REMOTE_EXECUTABLE}.upload.${DEPLOY_TOKEN}"
 REMOTE_MASTER_DCF_UPLOAD=".master.dcf.upload.${DEPLOY_TOKEN}"
 REMOTE_PROJECT_EDS_UPLOAD=".project.eds.upload.${DEPLOY_TOKEN}"
 REMOTE_MCU_NODE_DCF_UPLOAD=".mcu_node_1.bin.upload.${DEPLOY_TOKEN}"
+REMOTE_NODE1_DCF_UPLOAD=".node1.dcf.upload.${DEPLOY_TOKEN}"
 
 trap cleanup_on_exit 0
 trap 'exit 129' HUP
@@ -225,6 +237,11 @@ log_info "Local executable: $LOCAL_FILE_PATH"
 log_info "Local master DCF: $LOCAL_MASTER_DCF"
 log_info "Local project EDS: $LOCAL_PROJECT_EDS"
 log_info "Local MCU concise DCF: $LOCAL_MCU_NODE_DCF"
+if [ "$DEPLOY_NODE1_DCF" = true ]; then
+    log_info "Local Node1 DCF: $LOCAL_NODE1_DCF"
+else
+    log_info "Local Node1 DCF: not present; skipping optional upload"
+fi
 log_info "Action: $ACTION"
 
 if run_logged deploy_ssh "${DEPLOY_TARGET_USER}@${TARGET_IP}" sh -s -- \
@@ -250,12 +267,17 @@ upload_file "project.eds" "$LOCAL_PROJECT_EDS" \
     "$TARGET_CONFIG_PATH/$REMOTE_PROJECT_EDS_UPLOAD"
 upload_file "mcu_node_1.bin" "$LOCAL_MCU_NODE_DCF" \
     "$TARGET_CONFIG_PATH/$REMOTE_MCU_NODE_DCF_UPLOAD"
+if [ "$DEPLOY_NODE1_DCF" = true ]; then
+    upload_file "node1.dcf" "$LOCAL_NODE1_DCF" \
+        "$TARGET_CONFIG_PATH/$REMOTE_NODE1_DCF_UPLOAD"
+fi
 
 log_info "Backing up and replacing the remote runtime set"
 if run_logged deploy_ssh "${DEPLOY_TARGET_USER}@${TARGET_IP}" sh -s -- \
     "$TARGET_PATH" "$TARGET_CONFIG_PATH" "$REMOTE_EXECUTABLE" \
     "$REMOTE_EXECUTABLE_UPLOAD" "$REMOTE_MASTER_DCF_UPLOAD" \
     "$REMOTE_PROJECT_EDS_UPLOAD" "$REMOTE_MCU_NODE_DCF_UPLOAD" \
+    "$REMOTE_NODE1_DCF_UPLOAD" "$DEPLOY_NODE1_DCF" \
     <<'REMOTE_INSTALL'
 set -eu
 target_path=$1
@@ -265,6 +287,8 @@ remote_executable_upload=$4
 remote_master_dcf_upload=$5
 remote_project_eds_upload=$6
 remote_mcu_node_dcf_upload=$7
+remote_node1_dcf_upload=$8
+deploy_node1_dcf=$9
 backup_stamp=$(date +%Y%m%d-%H%M%S)
 rollback_token="rollback.$$"
 install_complete=false
@@ -273,16 +297,22 @@ executable_path="$target_path/$remote_executable"
 master_dcf_path="$config_path/master.dcf"
 project_eds_path="$config_path/project.eds"
 mcu_node_dcf_path="$config_path/mcu_node_1.bin"
+node1_dcf_path="$config_path/node1.dcf"
 
 executable_rollback="$target_path/.${remote_executable}.${rollback_token}"
 master_dcf_rollback="$config_path/.master.dcf.${rollback_token}"
 project_eds_rollback="$config_path/.project.eds.${rollback_token}"
 mcu_node_dcf_rollback="$config_path/.mcu_node_1.bin.${rollback_token}"
+node1_dcf_rollback="$config_path/.node1.dcf.${rollback_token}"
 
 executable_existed=false
 master_dcf_existed=false
 project_eds_existed=false
 mcu_node_dcf_existed=false
+# Rollback may run before the Node1 backup step. Only touch node1.dcf after
+# this transaction has established a valid restore or remove action.
+node1_dcf_restore_ready=false
+node1_dcf_remove_on_rollback=false
 
 rollback_install()
 {
@@ -309,6 +339,14 @@ rollback_install()
         mv -f "$mcu_node_dcf_rollback" "$mcu_node_dcf_path" || true
     else
         rm -f "$mcu_node_dcf_path"
+    fi
+    if [ "$node1_dcf_restore_ready" = true ]; then
+        mv -f "$node1_dcf_rollback" "$node1_dcf_path" || true
+    else
+        rm -f "$node1_dcf_rollback"
+        if [ "$node1_dcf_remove_on_rollback" = true ]; then
+            rm -f "$node1_dcf_path"
+        fi
     fi
 }
 
@@ -349,12 +387,21 @@ if [ -e "$mcu_node_dcf_path" ]; then
         "$config_path/backup/$(basename "$mcu_node_dcf_path").$backup_stamp"
     cp -p "$mcu_node_dcf_path" "$mcu_node_dcf_rollback"
 fi
+if [ "$deploy_node1_dcf" = true ] && [ -e "$node1_dcf_path" ]; then
+    cp -p "$node1_dcf_path" \
+        "$config_path/backup/$(basename "$node1_dcf_path").$backup_stamp"
+    cp -p "$node1_dcf_path" "$node1_dcf_rollback"
+    node1_dcf_restore_ready=true
+fi
 
 chmod 755 "$target_path/$remote_executable_upload"
 chmod 644 \
     "$config_path/$remote_master_dcf_upload" \
     "$config_path/$remote_project_eds_upload" \
     "$config_path/$remote_mcu_node_dcf_upload"
+if [ "$deploy_node1_dcf" = true ]; then
+    chmod 644 "$config_path/$remote_node1_dcf_upload"
+fi
 
 # Each rename is atomic because staging and destination files are on the same
 # target filesystem. The rollback copies restore the previous complete set if
@@ -363,6 +410,12 @@ mv -f "$target_path/$remote_executable_upload" "$executable_path"
 mv -f "$config_path/$remote_master_dcf_upload" "$master_dcf_path"
 mv -f "$config_path/$remote_project_eds_upload" "$project_eds_path"
 mv -f "$config_path/$remote_mcu_node_dcf_upload" "$mcu_node_dcf_path"
+if [ "$deploy_node1_dcf" = true ]; then
+    if [ "$node1_dcf_restore_ready" != true ]; then
+        node1_dcf_remove_on_rollback=true
+    fi
+    mv -f "$config_path/$remote_node1_dcf_upload" "$node1_dcf_path"
+fi
 
 install_complete=true
 trap - 0 HUP INT TERM
@@ -371,6 +424,9 @@ rm -f \
     "$master_dcf_rollback" \
     "$project_eds_rollback" \
     "$mcu_node_dcf_rollback"
+if [ "$deploy_node1_dcf" = true ]; then
+    rm -f "$node1_dcf_rollback"
+fi
 REMOTE_INSTALL
 then
     :
