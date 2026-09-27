@@ -3,7 +3,7 @@
 # CANopen Slave Tester
 
 [![CI](https://github.com/wdfk-prog/canopen-slave-tester/actions/workflows/ci.yml/badge.svg)](https://github.com/wdfk-prog/canopen-slave-tester/actions/workflows/ci.yml)
-[![Documentation](https://img.shields.io/badge/docs-Doxygen-blue.svg)](https://wdfk-prog.github.io/canopen-slave-tester/)
+[![Documentation](https://img.shields.io/badge/docs-MkDocs%20%2B%20Doxygen-blue.svg)](https://wdfk-prog.github.io/canopen-slave-tester/)
 [![Release](https://img.shields.io/github/v/release/wdfk-prog/canopen-slave-tester)](https://github.com/wdfk-prog/canopen-slave-tester/releases)
 
 CANopen Slave Tester 是基于 Lely CANopen 的 Linux Host 侧 CANopen 协议验证程序，用于配合 RT-Thread + CANopenNode MCU，通过标准 CANopen 服务、可观察的 Object Dictionary 数据，以及少量高层 Lely API 未覆盖的固定 wire-level fixture 验证协议行为。
@@ -20,7 +20,7 @@ CANopen Slave Tester 是基于 Lely CANopen 的 Linux Host 侧 CANopen 协议验
 - 保留 TQ8MP Yocto 交叉编译与部署方式作为默认构建路径。
 - GitHub Actions CI：Cppcheck 非阻断报告 + 真实 TQ8MP Yocto 交叉编译。
 - GitHub Release CD：发布 TQ8MP/aarch64 可执行文件、配置、目标 Lely 共享库和 SHA-256。
-- Doxygen API 文档通过 GitHub Pages 发布。
+- GitHub Pages 根目录发布 MkDocs 项目手册，`/api/` 发布 Doxygen API/源码参考。
 - `docs/en/` 与 `docs/zh/` 维护中英文项目文档。
 
 ## 当前默认验证配置
@@ -91,7 +91,7 @@ TQ8MP 编译检查和 Release 构建都运行在带 `tq8mp-yocto` 标签的 self
 
 推送 `v*` tag 后，CD 使用该 SDK 交叉编译，并把 `canopen-slave-tester-<tag>-tq8mp-aarch64.tar.gz` 与 SHA-256 文件上传到 GitHub Releases。
 
-Doxygen 站点发布到 [GitHub Pages](https://wdfk-prog.github.io/canopen-slave-tester/)。self-hosted runner 和 Release 详细配置见 [CI/CD](docs/zh/ci-cd.md)。
+[GitHub Pages](https://wdfk-prog.github.io/canopen-slave-tester/) 根目录发布 MkDocs 手册，Doxygen API/源码参考发布在 `/api/`。self-hosted runner 和 Release 详细配置见 [CI/CD](docs/zh/ci-cd.md)。
 
 ## 验证模块
 

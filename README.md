@@ -20,7 +20,7 @@ The deployed target is the TQ8MP Linux/aarch64 environment built with the projec
 - TQ8MP Yocto cross-build/deploy workflow retained as the default build path.
 - GitHub Actions CI with non-blocking Cppcheck reporting and real TQ8MP Yocto cross-compilation.
 - GitHub Release CD that packages the TQ8MP/aarch64 executable, configuration, target Lely shared libraries, and SHA-256 checksum.
-- Doxygen API documentation published through GitHub Pages.
+- MkDocs project manuals published at the GitHub Pages root, with generated Doxygen API/source reference under `/api/`.
 - Bilingual maintained documentation under `docs/en/` and `docs/zh/`.
 
 ## Current default validation profile
@@ -91,7 +91,7 @@ The TQ8MP compile job and release job run on a self-hosted runner labeled `tq8mp
 
 A `v*` tag builds the target with the Yocto SDK and publishes `canopen-slave-tester-<tag>-tq8mp-aarch64.tar.gz` plus its SHA-256 checksum to GitHub Releases.
 
-The generated Doxygen site is published at [GitHub Pages](https://wdfk-prog.github.io/canopen-slave-tester/). See [CI/CD](docs/en/ci-cd.md) for runner setup and release details.
+The [GitHub Pages](https://wdfk-prog.github.io/canopen-slave-tester/) root publishes the maintained MkDocs manuals; generated Doxygen API/source reference is available under `/api/`. See [CI/CD](docs/en/ci-cd.md) for details.
 
 ## Validation modules
 

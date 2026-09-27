@@ -1,0 +1,68 @@
+site_name: CANopen Slave Tester
+site_description: Lely CANopen host-side protocol validation framework
+site_url: https://wdfk-prog.github.io/canopen-slave-tester/
+repo_url: https://github.com/wdfk-prog/canopen-slave-tester
+repo_name: wdfk-prog/canopen-slave-tester
+
+theme:
+  name: material
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.top
+    - search.suggest
+    - content.code.copy
+
+nav:
+  - Home: index.md
+  - English:
+      - "Overview": en/index.md
+      - "Getting started": en/getting-started.md
+      - "Architecture": en/architecture.md
+      - "Configuration": en/configuration.md
+      - "Testing": en/testing.md
+      - "Deployment": en/deployment.md
+      - "VS Code debugging": en/vscode-debugging.md
+      - "DCF generator setup": en/dcfgen-setup.md
+      - "CI/CD": en/ci-cd.md
+      - "Manual API guide": en/api.md
+      - "GFC test": en/gfc-test.md
+      - "SRDO test": en/srdo-test.md
+      - "NMT master test": en/nmt-master-test.md
+      - "EMCY consumer test": en/emcy-consumer-test.md
+      - "CiA 303 LED test": en/cia303-led-test.md
+      - "Troubleshooting": en/troubleshooting.md
+  - 中文:
+      - "文档首页": zh/index.md
+      - "快速开始": zh/getting-started.md
+      - "架构": zh/architecture.md
+      - "配置": zh/configuration.md
+      - "测试": zh/testing.md
+      - "部署": zh/deployment.md
+      - "VS Code 调试": zh/vscode-debugging.md
+      - "DCF 生成工具": zh/dcfgen-setup.md
+      - "CI/CD": zh/ci-cd.md
+      - "手写 API 指南": zh/api.md
+      - "GFC 测试": zh/gfc-test.md
+      - "SRDO 测试": zh/srdo-test.md
+      - "NMT Master 测试": zh/nmt-master-test.md
+      - "EMCY Consumer 测试": zh/emcy-consumer-test.md
+      - "CiA 303 LED 测试": zh/cia303-led-test.md
+      - "故障排查": zh/troubleshooting.md
+  - Generated API: https://wdfk-prog.github.io/canopen-slave-tester/api/
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.highlight
+
+plugins:
+  - search
+
+validation:
+  nav:
+    not_found: warn
+  links:
+    not_found: info
+    anchors: info
