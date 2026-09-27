@@ -1,33 +1,37 @@
 DOXYFILE_ENCODING      = UTF-8
 PROJECT_NAME           = "CANopen Slave Tester"
-PROJECT_BRIEF          = "Lely CANopen host-side protocol validation framework for RT-Thread + CANopenNode devices"
+PROJECT_BRIEF          = "Generated C/C++ API and source reference"
 OUTPUT_DIRECTORY       = build/doxygen
 CREATE_SUBDIRS         = NO
 ALLOW_UNICODE_NAMES    = YES
 OUTPUT_LANGUAGE        = English
+OPTIMIZE_OUTPUT_FOR_C  = YES
+TYPEDEF_HIDES_STRUCT   = YES
 
-INPUT                  = include \
-                         src \
-                         docs/doxygen-mainpage.md \
-                         docs/en \
-                         docs/zh
-FILE_PATTERNS          = *.h \
-                         *.hpp \
-                         *.c \
+INPUT                  = docs/doxygen-mainpage.md \
+                         include \
+                         src
+INPUT_ENCODING         = UTF-8
+FILE_PATTERNS          = *.c \
+                         *.cc \
                          *.cpp \
+                         *.h \
+                         *.hpp \
                          *.md
 RECURSIVE              = YES
-EXCLUDE                = third_party \
-                         build \
-                         dist \
+EXCLUDE                = build \
                          .git \
                          .github
-EXCLUDE_PATTERNS       = */reference/* \
+EXCLUDE_PATTERNS       = */.git/* \
                          */build/* \
-                         */dist/*
+                         */devel/* \
+                         */logs/* \
+                         */dist/* \
+                         */README.md
 
 MARKDOWN_SUPPORT       = YES
 USE_MDFILE_AS_MAINPAGE = docs/doxygen-mainpage.md
+
 EXTRACT_ALL            = YES
 EXTRACT_STATIC         = YES
 EXTRACT_LOCAL_CLASSES  = YES
@@ -35,22 +39,26 @@ EXTRACT_PRIVATE        = NO
 HIDE_UNDOC_MEMBERS     = NO
 HIDE_UNDOC_CLASSES     = NO
 
+SOURCE_BROWSER         = YES
+INLINE_SOURCES         = NO
+REFERENCED_BY_RELATION = YES
+REFERENCES_RELATION    = YES
+SHOW_INCLUDE_FILES     = YES
+SHOW_HEADERFILE        = YES
+FULL_PATH_NAMES        = NO
+STRIP_FROM_PATH        = .
+
 GENERATE_HTML          = YES
 HTML_OUTPUT            = html
 GENERATE_TREEVIEW      = YES
 FULL_SIDEBAR           = YES
 SEARCHENGINE           = YES
+SERVER_BASED_SEARCH    = NO
 GENERATE_LATEX         = NO
-
-SOURCE_BROWSER         = YES
-REFERENCES_RELATION    = YES
-REFERENCED_BY_RELATION = YES
-SHOW_INCLUDE_FILES     = YES
-SHOW_HEADERFILE        = YES
+GENERATE_XML           = NO
 
 HAVE_DOT               = YES
 DOT_IMAGE_FORMAT       = svg
-INTERACTIVE_SVG        = YES
 CALL_GRAPH             = YES
 CALLER_GRAPH           = YES
 CLASS_GRAPH            = YES

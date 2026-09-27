@@ -104,16 +104,17 @@ git push origin v0.5.0
 
 After the workflow succeeds, open **Releases** on the repository page. The `.tar.gz` and `.sha256` files are attached to that release. After downloading both files into the same directory, verify the package with `sha256sum -c canopen-slave-tester-<tag>-tq8mp-aarch64.tar.gz.sha256`.
 
-## Doxygen Pages: `.github/workflows/pages-doxygen.yml`
+## MkDocs + Doxygen Pages: `.github/workflows/pages-doxygen.yml`
 
-Pushes to `master` that touch Doxygen, source, headers, or documentation rebuild the API site. The workflow:
+Pushes to `master` that touch documentation, MkDocs/Doxygen configuration, source, or headers rebuild one combined Pages site. The workflow:
 
-1. installs Doxygen and Graphviz;
-2. generates `build/doxygen/html` from `Doxyfile`;
-3. uploads the official GitHub Pages artifact;
-4. deploys through the `github-pages` environment.
+1. builds the maintained manual with MkDocs Material into `site/`;
+2. installs Doxygen and Graphviz and generates `build/doxygen/html`;
+3. copies the generated API/source reference into `site/api/`;
+4. uploads one official GitHub Pages artifact from `site/`;
+5. deploys through the `github-pages` environment.
 
-Doxygen warnings are visible but are not treated as errors. A generation/deployment failure still fails the workflow.
+The MkDocs build runs with `--strict`. Doxygen warnings remain visible but are not treated as errors; a generator or deployment failure still fails the workflow.
 
 For the first deployment, configure **Settings -> Pages -> Build and deployment -> Source -> GitHub Actions**.
 

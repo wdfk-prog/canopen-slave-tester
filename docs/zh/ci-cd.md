@@ -6,7 +6,7 @@
 
 - `.github/workflows/ci.yml`：Cppcheck 报告 + 真实 TQ8MP Yocto 交叉编译；
 - `.github/workflows/release.yml`：tag/手动触发 TQ8MP 构建并发布 GitHub Release；
-- `.github/workflows/pages-doxygen.yml`：生成 Doxygen 并部署 GitHub Pages。
+- `.github/workflows/pages-doxygen.yml`：MkDocs 发布项目手册，Doxygen 生成 `/api/`，合并后部署 GitHub Pages。
 
 不再使用 GHCR，也不再发布 Docker/OCI 镜像。
 
@@ -122,16 +122,17 @@ git push origin v0.5.0
 
 Workflow 成功后，进入仓库 **Releases** 页面即可下载 `.tar.gz` 和 `.sha256`。将两个文件放在同一目录后，可执行 `sha256sum -c canopen-slave-tester-<tag>-tq8mp-aarch64.tar.gz.sha256` 校验发布包。
 
-## Doxygen Pages：`.github/workflows/pages-doxygen.yml`
+## MkDocs + Doxygen Pages：`.github/workflows/pages-doxygen.yml`
 
-当 `master` 上的 Doxyfile、源码、头文件或文档发生变化时，Workflow 会：
+当 `master` 上的文档、MkDocs/Doxygen 配置、源码或头文件发生变化时，Workflow 会：
 
-1. 安装 Doxygen 与 Graphviz；
-2. 根据 `Doxyfile` 生成 `build/doxygen/html`；
-3. 上传官方 GitHub Pages artifact；
-4. 通过 `github-pages` environment 部署。
+1. 使用 MkDocs Material 将维护文档构建到 `site/`；
+2. 安装 Doxygen 与 Graphviz，并生成 `build/doxygen/html`；
+3. 把生成的 API/源码参考复制到 `site/api/`；
+4. 从 `site/` 上传一个官方 GitHub Pages artifact；
+5. 通过 `github-pages` environment 部署。
 
-Doxygen warning 只显示，不作为失败条件；真正的生成或部署失败仍会让 workflow 失败。
+MkDocs 使用 `--strict` 构建。Doxygen warning 只显示，不作为失败条件；任一生成器或部署失败仍会让 workflow 失败。
 
 第一次使用需要进入：
 
